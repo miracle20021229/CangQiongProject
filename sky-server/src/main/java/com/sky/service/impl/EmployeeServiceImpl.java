@@ -2,7 +2,7 @@ package com.sky.service.impl;
 
 import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
-import  com.sky.constant.MessageConstant;
+import com.sky.constant.MessageConstant;
 import com.sky.constant.PasswordConstant;
 import com.sky.constant.StatusConstant;
 import com.sky.context.BaseContext;
@@ -28,6 +28,7 @@ import java.util.List;
 public class EmployeeServiceImpl implements EmployeeService {
 
     public final EmployeeMapper employeeMapper;
+
     public EmployeeServiceImpl(EmployeeMapper employeeMapper) {
         this.employeeMapper = employeeMapper;
     }
@@ -58,7 +59,7 @@ public class EmployeeServiceImpl implements EmployeeService {
             throw new PasswordErrorException(MessageConstant.PASSWORD_ERROR);
         }
 
-        if (employee.getStatus() .equals( StatusConstant.DISABLE)) {
+        if (employee.getStatus().equals(StatusConstant.DISABLE)) {
             //账号被锁定
             throw new AccountLockedException(MessageConstant.ACCOUNT_LOCKED);
         }
@@ -70,11 +71,12 @@ public class EmployeeServiceImpl implements EmployeeService {
 
     /**
      * 新增员工
+     *
      * @param employeeDTO
      */
     @Override
     public void save(EmployeeDTO employeeDTO) {
-        Employee  employee = new Employee();
+        Employee employee = new Employee();
 
         //对象属性拷贝
         BeanUtils.copyProperties(employeeDTO, employee);
@@ -86,39 +88,39 @@ public class EmployeeServiceImpl implements EmployeeService {
         employee.setPassword(DigestUtils.md5DigestAsHex
                 (PasswordConstant.DEFAULT_PASSWORD.getBytes()));
 
-        //设置当前修改时间与创建时间
-        LocalDateTime now = LocalDateTime.now();
-        employee.setCreateTime(now);
-        employee.setUpdateTime(now);
-
-        //设置当前记录创建人id与修改人id
-        employee.setCreateUser(BaseContext.getCurrentId());
-        employee.setUpdateUser(BaseContext.getCurrentId());
+        // 当前修改时间、创建时间、创建人id、修改人id由AOP统一赋值
+        // LocalDateTime now = LocalDateTime.now();
+        // employee.setCreateTime(now);
+        // employee.setUpdateTime(now);
+        // employee.setCreateUser(BaseContext.getCurrentId());
+        // employee.setUpdateUser(BaseContext.getCurrentId());
 
         employeeMapper.insert(employee);
     }
 
 
     /**
-     *分页查询员工
+     * 分页查询员工
+     *
      * @param employeePageQueryDTO
      * @return
      */
     @Override
     public PageResult pagequery(EmployeePageQueryDTO employeePageQueryDTO) {
         //select * from employee limit 0,10
-        PageHelper.startPage(employeePageQueryDTO.getPage(),employeePageQueryDTO.getPageSize());
+        PageHelper.startPage(employeePageQueryDTO.getPage(), employeePageQueryDTO.getPageSize());
 
         Page<Employee> page = employeeMapper.pageQuery(employeePageQueryDTO);
 
         long total = page.getTotal();
         List<Employee> records = page.getResult();
 
-        return new PageResult(total,records);
+        return new PageResult(total, records);
     }
 
     /**
      * 启用禁用员工账号
+     *
      * @param status
      * @param id
      */
@@ -131,6 +133,7 @@ public class EmployeeServiceImpl implements EmployeeService {
 
     /**
      * 根据id查询员工信息
+     *
      * @param id
      * @return
      */
@@ -143,6 +146,7 @@ public class EmployeeServiceImpl implements EmployeeService {
 
     /**
      * 编辑员工信息
+     *
      * @param employeeDTO
      */
     @Override
@@ -151,8 +155,9 @@ public class EmployeeServiceImpl implements EmployeeService {
         //id,idNumber,phone,sex,name,username
         BeanUtils.copyProperties(employeeDTO, employee);
 
-        employee.setUpdateTime(LocalDateTime.now());
-        employee.setUpdateUser(BaseContext.getCurrentId());
+        // 修改时间、修改人id由AOP统一赋值
+        // employee.setUpdateTime(LocalDateTime.now());
+        // employee.setUpdateUser(BaseContext.getCurrentId());
 
         employeeMapper.update(employee);
     }
