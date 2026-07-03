@@ -14,14 +14,15 @@ public interface EmployeeMapper {
 
     /**
      * 根据用户名查询员工
-     * @param username 啊啊啊
-     * @return 啊啊啊
+     * @param username
+     * @return
      */
     Employee getByUsername(String username);
 
-    /*
-    * 插入员工数据
-    * */
+    /**
+     * 插入员工数据
+     * @param employee
+     */
     @AutoFill(value = OperationType.INSERT)
     @Insert("insert into employee " +
             "(name, username, password, phone, sex, id_number, " +

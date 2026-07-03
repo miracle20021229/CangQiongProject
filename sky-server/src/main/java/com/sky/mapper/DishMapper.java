@@ -30,6 +30,11 @@ public interface DishMapper {
     @AutoFill(value = OperationType.INSERT)
     void insert(Dish dish);
 
+    /**
+     * 菜品分页查询
+     * @param dishPageQueryDTO
+     * @return
+     */
     Page<DishVO> pageQuery(DishPageQueryDTO dishPageQueryDTO);
 
     /**
@@ -44,4 +49,19 @@ public interface DishMapper {
     void update(Dish dish);
 
     void deleteByIds(@Param("ids") List<Long> ids);
+
+    /**
+     * 根据菜品id列表查询关联的套餐id
+     * 用于批量删除菜品前校验：如果返回结果不为空，说明这些菜品被套餐使用，不能删除。
+     * @param ids 菜品id列表
+     * @return 关联的套餐id列表
+     */
+    List<Long> getSetmealIdsByDishIds(@Param("ids") List<Long> ids);
+
+
+    /**
+     * 根据分类id查询菜品
+     * @return
+     */
+    List<DishVO> getDishsByCategoryId(Long categoryId);
 }

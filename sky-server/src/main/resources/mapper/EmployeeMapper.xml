@@ -2,9 +2,11 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd" >
 <mapper namespace="com.sky.mapper.EmployeeMapper">
+
     <select id="getByUsername" resultType="com.sky.entity.Employee">
         select * from employee where username = #{username}
     </select>
+
     <select id="pageQuery" resultType="com.sky.entity.Employee">
         select * from employee
         <where>
@@ -14,6 +16,7 @@
         </where>
         order by create_time desc
     </select>
+
     <update id="update" parameterType="employee">
         update employee
         <set>
@@ -29,4 +32,5 @@
         </set>
         where id = #{id}
     </update>
+
 </mapper>

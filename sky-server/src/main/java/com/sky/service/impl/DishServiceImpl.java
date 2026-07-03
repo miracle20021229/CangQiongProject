@@ -11,7 +11,6 @@ import com.sky.entity.DishFlavor;
 import com.sky.exception.DeletionNotAllowedException;
 import com.sky.mapper.DishFlavorMapper;
 import com.sky.mapper.DishMapper;
-import com.sky.mapper.SetmealDishMapper;
 import com.sky.result.PageResult;
 import com.sky.service.DishService;
 import com.sky.vo.DishVO;
@@ -21,6 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 
 
@@ -33,11 +33,6 @@ public class DishServiceImpl implements DishService {
 
     @Autowired
     private DishFlavorMapper dishFlavorMapper;
-
-    @Autowired
-    private  SetmealDishMapper setmealDishMapper;
-
-
 
     /**
      * 新增菜品
@@ -89,17 +84,12 @@ public class DishServiceImpl implements DishService {
                 throw new DeletionNotAllowedException("菜品起售中,不能删除");
             }
         }
-        //判断当前是否能删除菜品---是否关联套餐
-        List<Long> setmealIdsByDishIds = setmealDishMapper.getSetmealIdsByDishIds(ids);
+        //删除菜品前先查 setmeal_dish 关联表，避免删除已经被套餐使用的菜品
+        List<Long> setmealIdsByDishIds = dishMapper.getSetmealIdsByDishIds(ids);
         if (setmealIdsByDishIds != null && setmealIdsByDishIds.size() > 0) {
             throw new DeletionNotAllowedException(MessageConstant.DISH_BE_RELATED_BY_SETMEAL);
         }
-        //删除菜品
-        // for (Long id : ids) {
-        //     setmealDishMapper.deleteById(id);
-            //删除菜品关联口味
-        //     setmealDishMapper.deleteFlavorById(id);
-        // }
+        //删除菜品和菜品口味
         dishMapper.deleteByIds(ids);
         dishFlavorMapper.deleteByDishIds(ids);
     }
@@ -153,5 +143,15 @@ public class DishServiceImpl implements DishService {
             flavors.forEach(dishFlavor -> dishFlavor.setDishId(dishId));
             dishFlavorMapper.insertBatch(flavors);
         }
+    }
+
+
+    /**
+     * 根据分类id查询菜品
+     * @return
+     */
+    @Override
+    public List<DishVO> getDishsByCategoryId(Long categoryId) {
+        return dishMapper.getDishsByCategoryId(categoryId);
     }
 }
