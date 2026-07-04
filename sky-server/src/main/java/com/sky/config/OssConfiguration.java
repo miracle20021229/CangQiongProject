@@ -9,7 +9,7 @@ import org.springframework.context.annotation.Configuration;
 
 @Configuration
 @Slf4j
-public class OssConfigration {
+public class OssConfiguration {
     @Bean
     //创建aliossutils对象
     public AliOssUtil aliOssUtil(AliOssProperties aliOssProperties) {
