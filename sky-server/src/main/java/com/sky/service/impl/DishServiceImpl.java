@@ -17,12 +17,13 @@ import com.sky.vo.DishVO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
-
+import java.util.Set;
 
 @Service
 @Slf4j
@@ -33,6 +34,9 @@ public class DishServiceImpl implements DishService {
 
     @Autowired
     private DishFlavorMapper dishFlavorMapper;
+
+    @Autowired
+    private RedisTemplate redisTemplate;
 
     /**
      * 条件查询菜品和口味
@@ -77,6 +81,8 @@ public class DishServiceImpl implements DishService {
             flavors.forEach(dishFlavor -> dishFlavor.setDishId(dishId));
             dishFlavorMapper.insertBatch(flavors);
         }
+        String key = "dish_" + dishDTO.getCategoryId();
+        cleanCache(key);
     }
 
     /**
@@ -114,6 +120,8 @@ public class DishServiceImpl implements DishService {
         //删除菜品和菜品口味
         dishMapper.deleteByIds(ids);
         dishFlavorMapper.deleteByDishIds(ids);
+
+        cleanCache("dish_*");
     }
 
     /**
@@ -128,6 +136,8 @@ public class DishServiceImpl implements DishService {
                 .status(status)
                 .build();
         dishMapper.update(dish);
+
+        cleanCache("dish_*");
     }
 
     /**
@@ -165,6 +175,8 @@ public class DishServiceImpl implements DishService {
             flavors.forEach(dishFlavor -> dishFlavor.setDishId(dishId));
             dishFlavorMapper.insertBatch(flavors);
         }
+
+        cleanCache("dish_*");
     }
 
 
@@ -175,5 +187,15 @@ public class DishServiceImpl implements DishService {
     @Override
     public List<DishVO> getDishsByCategoryId(Long categoryId) {
         return dishMapper.getDishsByCategoryId(categoryId);
+    }
+
+    /**
+     * 清除缓存
+     */
+    private void cleanCache(String pattern) {
+        Set keys = redisTemplate.keys(pattern);
+        if (keys != null && keys.size() > 0) {
+            redisTemplate.delete(keys);
+        }
     }
 }
