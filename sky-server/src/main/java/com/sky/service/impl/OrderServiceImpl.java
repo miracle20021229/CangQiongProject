@@ -1,6 +1,7 @@
 package com.sky.service.impl;
 
-import com.alibaba.fastjson.JSONObject;
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONObject;
 import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
 import com.sky.constant.MessageConstant;
@@ -13,11 +14,13 @@ import com.sky.exception.ShoppingCartBusinessException;
 import com.sky.mapper.*;
 import com.sky.result.PageResult;
 import com.sky.service.OrderService;
+import com.sky.utils.MapUtil;
 import com.sky.utils.WeChatPayUtil;
 import com.sky.vo.OrderPaymentVO;
 import com.sky.vo.OrderStatisticsVO;
 import com.sky.vo.OrderSubmitVO;
 import com.sky.vo.OrderVO;
+import com.sky.websocket.WebSocketServer;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -25,7 +28,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class OrderServiceImpl implements OrderService {
@@ -41,6 +46,20 @@ public class OrderServiceImpl implements OrderService {
     private WeChatPayUtil weChatPayUtil;
     @Autowired
     private UserMapper userMapper;
+    @Autowired
+    private MapUtil mapUtil;
+    @Autowired
+    private WebSocketServer webSocketServer;
+
+
+    private boolean checkOutOfRange(AddressBook addressBook) {
+        String address = addressBook.getCityName()
+                + addressBook.getDistrictName()
+                + addressBook.getDetail();
+        String destination = mapUtil.getLocation(address);
+        Long distance = mapUtil.getRidingDistance(destination);
+        return distance == null || distance > 5000;
+    }
 
 
     /**
@@ -57,6 +76,10 @@ public class OrderServiceImpl implements OrderService {
         if(addressBook == null){
             throw new AddressBookBusinessException(MessageConstant.ADDRESS_BOOK_IS_NULL);
         }
+        if (checkOutOfRange(addressBook)) {
+            throw new OrderBusinessException(MessageConstant.OUT_OF_RANGE);
+        }
+
         //购物车为空
         Long userId = BaseContext.getCurrentId();
         ShoppingCart  shoppingCart = new ShoppingCart();
@@ -71,8 +94,9 @@ public class OrderServiceImpl implements OrderService {
         orders.setUserId(userId);
         orders.setNumber(String.valueOf(System.currentTimeMillis()));
         orders.setOrderTime(LocalDateTime.now());
-        orders.setStatus(Orders.PENDING_PAYMENT);
-        orders.setPayStatus(Orders.UN_PAID);
+        orders.setStatus(Orders.TO_BE_CONFIRMED);
+        orders.setPayStatus(Orders.PAID);
+        orders.setCheckoutTime(LocalDateTime.now());
         orders.setPhone(addressBook.getPhone());
         orders.setAddress(addressBook.getDetail());
         orders.setConsignee(addressBook.getConsignee());
@@ -88,6 +112,7 @@ public class OrderServiceImpl implements OrderService {
         orderDetailMapper.insertBatch(orderDetailList);
         //4 清空购物车
         shoppingCartMapper.deleteByUserId(userId);
+        sendOrderNotification(orders.getId());
         //返回封装VO结果
         OrderSubmitVO orderSubmitVO = OrderSubmitVO.builder()
                 .id(orders.getId())
@@ -134,6 +159,15 @@ public class OrderServiceImpl implements OrderService {
         return vo;
     }
 
+    private void sendOrderNotification(Long orderId) {
+        Map<String,Object> map = new HashMap<>();
+        map.put("type", 1);
+        map.put("orderId", orderId);
+        map.put("content","下单成功,请尽快处理");
+        String json = JSON.toJSONString(map);
+        webSocketServer.sendToAllClient(json);
+    }
+
     /**
      * 支付成功，修改订单状态
      *
@@ -143,6 +177,9 @@ public class OrderServiceImpl implements OrderService {
 
         // 根据订单号查询订单
         Orders ordersDB = orderMapper.getByNumber(outTradeNo);
+        if (Orders.PAID.equals(ordersDB.getPayStatus())) {
+            return;
+        }
 
         // 根据订单id更新订单的状态、支付方式、支付状态、结账时间
         Orders orders = Orders.builder()
@@ -153,6 +190,14 @@ public class OrderServiceImpl implements OrderService {
                 .build();
 
         orderMapper.update(orders);
+
+        //提醒商家下单成功
+        Map<String,Object> map = new HashMap<>();
+        map.put("type", 1);//1表示下单成功，2表示催单
+        map.put("orderId", ordersDB.getId());
+        map.put("content","下单成功,请尽快出餐");
+        String json = JSON.toJSONString(map);
+        webSocketServer.sendToAllClient(json);
     }
 
     /**
@@ -385,5 +430,24 @@ public class OrderServiceImpl implements OrderService {
                 .status(Orders.DELIVERY_IN_PROGRESS)
                 .build();
         orderMapper.update(updateOrders);
+    }
+
+
+    /**
+     * 客户催单
+     * @param id
+     */
+    @Override
+    public void remind(Long id) {
+        Orders orders = orderMapper.getById(id);
+        if (orders == null ) {
+            throw new OrderBusinessException(MessageConstant.ORDER_STATUS_ERROR);
+        }
+        Map<String,Object> map = new HashMap<>();
+        map.put("type", 2);
+        map.put("orderId", id);
+        map.put("content","订单号:"+orders.getNumber());
+        String json = JSON.toJSONString(map);
+        webSocketServer.sendToAllClient(json);
     }
 }

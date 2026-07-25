@@ -11,6 +11,10 @@ import lombok.extern.slf4j.Slf4j;
 import java.io.ByteArrayInputStream;
 import java.util.Date;
 
+
+/**
+ * 阿里云
+ */
 @Data
 @AllArgsConstructor
 @Slf4j

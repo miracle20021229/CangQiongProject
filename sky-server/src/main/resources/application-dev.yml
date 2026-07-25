@@ -19,3 +19,6 @@ sky:
   wechat:
     appid: ${WECHAT_APPID}
     secret: ${WECHAT_SECRET}
+  map:
+    key: ${AMAP_KEY}
+    adminAddress: ${SHOP_ADMIN_ADDRESS}

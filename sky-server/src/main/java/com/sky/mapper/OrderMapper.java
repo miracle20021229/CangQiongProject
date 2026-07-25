@@ -1,12 +1,17 @@
 package com.sky.mapper;
 
 import com.github.pagehelper.Page;
+import com.sky.dto.GoodsSalesDTO;
 import com.sky.dto.OrdersPageQueryDTO;
 import com.sky.entity.Orders;
 import com.sky.vo.OrderStatisticsVO;
 import com.sky.vo.OrderVO;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+
+import java.time.LocalDateTime;
+import java.util.List;
 
 @Mapper
 public interface OrderMapper {
@@ -50,4 +55,34 @@ public interface OrderMapper {
      * @return
      */
     OrderStatisticsVO statistics();
+
+
+    /**
+     * 根据订单状态与订单时间查询订单
+     * @return
+     */
+    @Select("select * from orders where status = #{status} and order_time < #{orderTime}")
+    List<Orders> getByStatusAndOrderTimeLT(@Param("status") Integer status,
+                                           @Param("orderTime") LocalDateTime orderTime);
+
+    /**
+     * 根据时间范围和订单状态查询营业额
+     */
+    Double sumByMap(@Param("beginTime") LocalDateTime beginTime,
+                    @Param("endTime") LocalDateTime endTime,
+                    @Param("status") Integer status);
+
+    /**
+     * 根据时间范围和订单状态统计订单数量
+     */
+    Integer countByMap(@Param("beginTime") LocalDateTime beginTime,
+                       @Param("endTime") LocalDateTime endTime,
+                       @Param("status") Integer status);
+
+    /**
+     * 统计指定时间范围内的销量排名Top10
+     */
+    List<GoodsSalesDTO> getSalesTop10(@Param("beginTime") LocalDateTime beginTime,
+                                      @Param("endTime") LocalDateTime endTime,
+                                      @Param("status") Integer status);
 }

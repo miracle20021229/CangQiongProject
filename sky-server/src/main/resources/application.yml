@@ -19,11 +19,11 @@ spring:
     database: ${sky.redis.database}
 
 mybatis:
-  #mapperé…ç½®æ–‡ä»¶
+  #mapperÅäÖÃÎÄ¼ş
   mapper-locations: classpath:mapper/*.xml
   type-aliases-package: com.sky.entity
   configuration:
-    #å¼€å¯é©¼å³°å‘½å
+    #¿ªÆôÍÕ·åÃüÃû
     map-underscore-to-camel-case: true
 
 logging:
@@ -35,18 +35,21 @@ logging:
         controller: info
 
 sky:
+  cache:
+    # »¥³â»º´æÖØ½¨Ê±£¬µ¥´ÎÇëÇóµÈ´ıRedissonËøµÄ×î³¤Ê±¼ä
+    mutex-lock-wait-millis: 500
   jwt:
-    # è®¾ç½®jwtç­¾ååŠ å¯†æ—¶ä½¿ç”¨çš„ç§˜é’¥
+    # ÉèÖÃjwtÇ©Ãû¼ÓÃÜÊ±Ê¹ÓÃµÄÃØÔ¿
     admin-secret-key: ${JWT_ADMIN_SECRET_KEY}
-    # è®¾ç½®jwtè¿‡æœŸæ—¶é—´
+    # ÉèÖÃjwt¹ıÆÚÊ±¼ä
     admin-ttl: 36000000
-    # è®¾ç½®å‰ç«¯ä¼ é€’è¿‡æ¥çš„ä»¤ç‰Œåç§°
+    # ÉèÖÃÇ°¶Ë´«µİ¹ıÀ´µÄÁîÅÆÃû³Æ
     admin-token-name: token
-    # è®¾ç½®jwtç­¾ååŠ å¯†æ—¶ä½¿ç”¨çš„ç§˜é’¥
+    # ÉèÖÃjwtÇ©Ãû¼ÓÃÜÊ±Ê¹ÓÃµÄÃØÔ¿
     user-secret-key: ${JWT_USER_SECRET_KEY}
-    # è®¾ç½®jwtè¿‡æœŸæ—¶é—´
+    # ÉèÖÃjwt¹ıÆÚÊ±¼ä
     user-ttl: 36000000
-    # è®¾ç½®å‰ç«¯ä¼ é€’è¿‡æ¥çš„ä»¤ç‰Œåç§°
+    # ÉèÖÃÇ°¶Ë´«µİ¹ıÀ´µÄÁîÅÆÃû³Æ
     user-token-name: authentication
   alioss:
     accessKeyId: ${sky.alioss.accessKeyId}
@@ -56,3 +59,6 @@ sky:
   wechat:
     appid: ${sky.wechat.appid}
     secret: ${sky.wechat.secret}
+  map:
+    adminAddress: ${sky.map.adminAddress}
+    key: ${sky.map.key}

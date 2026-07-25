@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.sky.mapper.UserCouponMapper">
+
+    <resultMap id="UserCouponVOMap" type="com.sky.vo.UserCouponVO">
+        <id column="id" property="id"/>
+        <result column="coupon_id" property="couponId"/>
+        <result column="coupon_name" property="couponName"/>
+        <result column="threshold_amount" property="thresholdAmount"/>
+        <result column="discount_amount" property="discountAmount"/>
+        <result column="status" property="status"/>
+        <result column="claim_time" property="claimTime"/>
+        <result column="expire_time" property="expireTime"/>
+        <result column="use_time" property="useTime"/>
+        <result column="order_id" property="orderId"/>
+    </resultMap>
+
+    <!-- 新增用户领券记录并回填自增主键 -->
+    <insert id="insert" parameterType="com.sky.entity.UserCoupon"
+            useGeneratedKeys="true" keyProperty="id">
+        insert into user_coupon
+            (coupon_id, user_id, status, claim_time, expire_time, use_time, order_id)
+        values
+            (#{couponId}, #{userId}, #{status}, #{claimTime}, #{expireTime}, #{useTime}, #{orderId})
+    </insert>
+
+    <!-- 业务层领取前的一人一券检查，唯一索引负责最终并发兜底 -->
+    <select id="countByCouponIdAndUserId" resultType="java.lang.Integer">
+        select count(id)
+        from user_coupon
+        where coupon_id = #{couponId}
+          and user_id = #{userId}
+    </select>
+
+    <!-- 查询用户券包；未使用但已超过有效期的券直接展示为已过期 -->
+    <select id="listByUserId" resultMap="UserCouponVOMap">
+        select uc.id,
+               uc.coupon_id,
+               sc.name as coupon_name,
+               sc.threshold_amount,
+               sc.discount_amount,
+               case
+                   when uc.status = 0
+                       and uc.expire_time is not null
+                       and uc.expire_time &lt;= now() then 2
+                   else uc.status
+               end as status,
+               uc.claim_time,
+               uc.expire_time,
+               uc.use_time,
+               uc.order_id
+        from user_coupon uc
+        inner join seckill_coupon sc on sc.id = uc.coupon_id
+        where uc.user_id = #{userId}
+        order by uc.claim_time desc
+    </select>
+
+</mapper>

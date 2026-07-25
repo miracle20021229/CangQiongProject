@@ -4,3 +4,7 @@
 *.class
 *Test.java
 **/test/
+*.log
+generated-food-images/
+tmp-image-resource-review/
+tmp-image-upload-test/
