@@ -18,12 +18,19 @@ spring:
     password: ${sky.redis.password}
     database: ${sky.redis.database}
 
+rocketmq:
+  name-server: ${ROCKETMQ_NAME_SERVER:127.0.0.1:9876}
+  producer:
+    group: ${ROCKETMQ_PRODUCER_GROUP:sky-seckill-producer}
+    send-message-timeout: 3000
+    retry-times-when-send-failed: 2
+
 mybatis:
-  #mapperÅäÖÃÎÄ¼ş
+  #mapperé…ç½®æ–‡ä»¶
   mapper-locations: classpath:mapper/*.xml
   type-aliases-package: com.sky.entity
   configuration:
-    #¿ªÆôÍÕ·åÃüÃû
+    #å¼€å¯é©¼å³°å‘½å
     map-underscore-to-camel-case: true
 
 logging:
@@ -36,20 +43,24 @@ logging:
 
 sky:
   cache:
-    # »¥³â»º´æÖØ½¨Ê±£¬µ¥´ÎÇëÇóµÈ´ıRedissonËøµÄ×î³¤Ê±¼ä
+    # äº’æ–¥ç¼“å­˜é‡å»ºæ—¶ï¼Œå•æ¬¡è¯·æ±‚ç­‰å¾…Redissoné”çš„æœ€é•¿æ—¶é—´
     mutex-lock-wait-millis: 500
+  rocketmq:
+    seckill-coupon-compensation:
+      topic: ${SECKILL_COUPON_COMPENSATION_TOPIC:sky-seckill-coupon-compensation}
+      consumer-group: ${SECKILL_COUPON_COMPENSATION_CONSUMER_GROUP:sky-seckill-coupon-compensation-consumer}
   jwt:
-    # ÉèÖÃjwtÇ©Ãû¼ÓÃÜÊ±Ê¹ÓÃµÄÃØÔ¿
-    admin-secret-key: ${JWT_ADMIN_SECRET_KEY}
-    # ÉèÖÃjwt¹ıÆÚÊ±¼ä
+    # è®¾ç½®jwtç­¾ååŠ å¯†æ—¶ä½¿ç”¨çš„ç§˜é’¥
+    admin-secret-key: itcast
+    # è®¾ç½®jwtè¿‡æœŸæ—¶é—´
     admin-ttl: 36000000
-    # ÉèÖÃÇ°¶Ë´«µİ¹ıÀ´µÄÁîÅÆÃû³Æ
+    # è®¾ç½®å‰ç«¯ä¼ é€’è¿‡æ¥çš„ä»¤ç‰Œåç§°
     admin-token-name: token
-    # ÉèÖÃjwtÇ©Ãû¼ÓÃÜÊ±Ê¹ÓÃµÄÃØÔ¿
-    user-secret-key: ${JWT_USER_SECRET_KEY}
-    # ÉèÖÃjwt¹ıÆÚÊ±¼ä
+    # è®¾ç½®jwtç­¾ååŠ å¯†æ—¶ä½¿ç”¨çš„ç§˜é’¥
+    user-secret-key: itcast_user
+    # è®¾ç½®jwtè¿‡æœŸæ—¶é—´
     user-ttl: 36000000
-    # ÉèÖÃÇ°¶Ë´«µİ¹ıÀ´µÄÁîÅÆÃû³Æ
+    # è®¾ç½®å‰ç«¯ä¼ é€’è¿‡æ¥çš„ä»¤ç‰Œåç§°
     user-token-name: authentication
   alioss:
     accessKeyId: ${sky.alioss.accessKeyId}

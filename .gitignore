@@ -8,3 +8,17 @@
 generated-food-images/
 tmp-image-resource-review/
 tmp-image-upload-test/
+
+# 秒杀券流程测试需要进入版本管理
+!sky-server/src/test/
+!sky-server/src/test/java/
+!sky-server/src/test/java/com/
+!sky-server/src/test/java/com/sky/
+!sky-server/src/test/java/com/sky/mq/
+!sky-server/src/test/java/com/sky/mq/**
+!sky-server/src/test/java/com/sky/listener/
+!sky-server/src/test/java/com/sky/listener/**
+!sky-server/src/test/java/com/sky/service/
+!sky-server/src/test/java/com/sky/service/impl/
+!sky-server/src/test/java/com/sky/service/impl/**
+sky-server/src/test/java/Demo.java

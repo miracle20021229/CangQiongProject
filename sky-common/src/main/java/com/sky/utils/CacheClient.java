@@ -3,7 +3,7 @@ package com.sky.utils;
 import com.alibaba.fastjson2.JSON;
 import com.sky.exception.BaseException;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -118,8 +118,7 @@ public class CacheClient {
      * 冷缓存互斥初始化：Key丢失或格式损坏时加锁，只允许一个请求查询数据库。
      * 锁超时后复查缓存，仍不可用则快速失败，避免请求线程无限阻塞。
      */
-    private <R> R initializeLogicalExpireCache(String key, Type type, Supplier<R> dbFallback,
-                                               Long time, TimeUnit unit) {
+    private <R> R initializeLogicalExpireCache(String key, Type type, Supplier<R> dbFallback, Long time, TimeUnit unit) {
         RLock lock = redissonClient.getLock("lock:" + key);
         boolean locked;
         try {
@@ -153,8 +152,7 @@ public class CacheClient {
     /**
      * 提交异步重建任务，锁由后台线程获取并释放。
      */
-    private <R> void submitCacheRebuild(String key, Type type, Supplier<R> dbFallback,
-                                        Long time, TimeUnit unit) {
+    private <R> void submitCacheRebuild(String key, Type type, Supplier<R> dbFallback, Long time, TimeUnit unit) {
         RLock lock = redissonClient.getLock("lock:" + key);
         try {
             cacheRebuildExecutor.execute(() -> {
@@ -180,8 +178,7 @@ public class CacheClient {
      * 获得锁后双重检查，缓存仍不可用才查询数据库并写入Redis。
      * 双重检查命中未过期缓存时直接返回，避免重复查库。
      */
-    private <R> R rebuildLogicalExpireCache(String key, Type type, Supplier<R> dbFallback,
-                                            Long time, TimeUnit unit) {
+    private <R> R rebuildLogicalExpireCache(String key, Type type, Supplier<R> dbFallback, Long time, TimeUnit unit) {
         String latestJson = stringRedisTemplate.opsForValue().get(key);
         if (StringUtils.isNotBlank(latestJson)) {
             try {
