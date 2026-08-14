@@ -117,7 +117,7 @@ public class SeckillCouponAdminServiceImpl implements SeckillCouponAdminService 
 
         SeckillCoupon currentCoupon = seckillCouponFinder.getByIdOrThrow(id);
         if (status.equals(currentCoupon.getStatus())) {
-            publishChangedEvent(id, SeckillCouponChangedEvent.ChangeType.STATUS_CHANGED);
+            publishChangedEvent(id, SeckillCouponChangedEvent.ChangeType.ACTIVITY_REPAIR_REQUESTED);
             return;
         }
 

@@ -1,15 +1,14 @@
 package com.sky.redis;
 
 import com.sky.entity.SeckillCoupon;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
+import java.time.Instant;
 import java.time.ZoneId;
-import java.util.Arrays;
-import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -19,14 +18,9 @@ import java.util.Map;
 @Component
 public class SeckillCouponRedisRepository {
 
-    public static final Long SUCCESS = 0L;
-    public static final Long OUT_OF_STOCK = 1L;
-    public static final Long DUPLICATE_CLAIM = 2L;
-    public static final Long ACTIVITY_NOT_INITIALIZED = 3L;
-    public static final Long ACTIVITY_DISABLED = 4L;
-    public static final Long ACTIVITY_NOT_STARTED = 5L;
-    public static final Long ACTIVITY_ENDED = 6L;
-    private static final String KEY_PREFIX = "seckill:coupon:{";
+    private static final String ACTIVITY_KEY_TEMPLATE = "seckill:coupon:{%s}:activity";
+    private static final String CLAIMED_USERS_KEY_TEMPLATE = "seckill:coupon:{%s}:users";
+    private static final String CLAIM_TRANSACTIONS_KEY_TEMPLATE = "seckill:coupon:{%s}:claims";
     private static final String STATUS_FIELD = "status";
     private static final String START_TIME_FIELD = "startTime";
     private static final String END_TIME_FIELD = "endTime";
@@ -34,21 +28,19 @@ public class SeckillCouponRedisRepository {
     private static final String CLEANUP_TIME_FIELD = "cleanupTime";
     private static final ZoneId BUSINESS_ZONE_ID = ZoneId.of("Asia/Shanghai");
 
-    @Autowired
-    private StringRedisTemplate stringRedisTemplate;
+    private final StringRedisTemplate stringRedisTemplate;
+    private final DefaultRedisScript<Long> seckillCouponLuaScript;
+
+    public SeckillCouponRedisRepository(StringRedisTemplate stringRedisTemplate, @Qualifier("seckillCouponLuaScript") DefaultRedisScript<Long> seckillCouponLuaScript) {
+        this.stringRedisTemplate = stringRedisTemplate;
+        this.seckillCouponLuaScript = seckillCouponLuaScript;
+    }
 
     /**
-     * 秒杀券 Lua 脚本对象，由 Spring 容器根据 Bean 名称注入。
+     * 完整初始化秒杀活动快照。
+     * 仅在活动启用或快照缺失时调用，避免覆盖Lua已经预扣的Redis库存。
      */
-    @Autowired
-    @Qualifier("seckillCouponLuaScript")
-    private DefaultRedisScript<Long> seckillCouponLuaScript;
-
-    /**
-     * 将秒杀需要的券快照写入Redis Hash。
-     * 只保存Lua会使用的状态、领取时间和库存；展示字段仍由逻辑过期列表缓存负责。
-     */
-    public void syncActivity(SeckillCoupon coupon) {
+    public void initializeActivity(SeckillCoupon coupon) {
         if (coupon == null || coupon.getId() == null || coupon.getStatus() == null || coupon.getRemainingStock() == null
                 || coupon.getClaimStartTime() == null || coupon.getClaimEndTime() == null) {
             throw new IllegalArgumentException("秒杀券活动数据不完整，无法同步到Redis");
@@ -64,25 +56,62 @@ public class SeckillCouponRedisRepository {
         activity.put(STOCK_FIELD, String.valueOf(coupon.getRemainingStock()));
         activity.put(CLEANUP_TIME_FIELD, String.valueOf(cleanupTime));
 
-        String activityKey = activityKey(coupon.getId());
+        String activityKey = ACTIVITY_KEY_TEMPLATE.formatted(coupon.getId());
+        String claimedUsersKey = CLAIMED_USERS_KEY_TEMPLATE.formatted(coupon.getId());
+        String claimTransactionsKey = CLAIM_TRANSACTIONS_KEY_TEMPLATE.formatted(coupon.getId());
         stringRedisTemplate.opsForHash().putAll(activityKey, activity);
-        Date cleanupDate = Date.from(coupon.getClaimEndTime().plusDays(1L).atZone(BUSINESS_ZONE_ID).toInstant());
-        stringRedisTemplate.expireAt(activityKey, cleanupDate);
-        stringRedisTemplate.expireAt(claimedUsersKey(coupon.getId()), cleanupDate);
+        Instant cleanupInstant = Instant.ofEpochSecond(cleanupTime);
+        stringRedisTemplate.expireAt(activityKey, cleanupInstant);
+        stringRedisTemplate.expireAt(claimedUsersKey, cleanupInstant);
+        stringRedisTemplate.expireAt(claimTransactionsKey, cleanupInstant);
     }
 
     /**
-     * 执行Lua，原子校验活动、时间、库存和一人一券，并预扣一张Redis库存。
+     * 停用活动时只更新状态，保留Redis库存和已领取用户集合。
      */
-    public Long tryPreDeduct(Long couponId, Long userId) {
-        return stringRedisTemplate.execute(seckillCouponLuaScript, Arrays.asList(activityKey(couponId), claimedUsersKey(couponId)), String.valueOf(userId));
+    public void updateActivityStatus(Long couponId, Integer status) {
+        if (couponId == null || status == null) {
+            throw new IllegalArgumentException("优惠券ID和状态不能为空");
+        }
+
+        String activityKey = ACTIVITY_KEY_TEMPLATE.formatted(couponId);
+        if (Boolean.TRUE.equals(stringRedisTemplate.hasKey(activityKey))) {
+            stringRedisTemplate.opsForHash().put(activityKey, STATUS_FIELD, String.valueOf(status));
+        }
     }
 
-    private String activityKey(Long couponId) {
-        return KEY_PREFIX + couponId + "}:activity";
+    /**
+     * 判断Lua所需的活动字段是否完整。
+     */
+    public boolean isActivityComplete(Long couponId) {
+        if (couponId == null) {
+            throw new IllegalArgumentException("优惠券ID不能为空");
+        }
+
+        String activityKey = ACTIVITY_KEY_TEMPLATE.formatted(couponId);
+        List<Object> fields = stringRedisTemplate.opsForHash().multiGet(activityKey, List.of(STATUS_FIELD, START_TIME_FIELD, END_TIME_FIELD, STOCK_FIELD, CLEANUP_TIME_FIELD));
+        return fields != null && fields.size() == 5 && fields.stream().noneMatch(field -> field == null || String.valueOf(field).isEmpty());
     }
 
-    private String claimedUsersKey(Long couponId) {
-        return KEY_PREFIX + couponId + "}:users";
+    /**
+     * 流程3-步骤9～10：接收Listener的预扣请求，并执行Lua原子校验与库存预扣。
+     */
+    public Long tryPreDeduct(Long couponId, Long userId, String claimId) {
+        if (couponId == null || userId == null || claimId == null || claimId.isBlank()) {
+            throw new IllegalArgumentException("优惠券ID、用户ID和领取流水ID不能为空");
+        }
+        // 流程3-步骤10：Redis在一次Lua执行中完成校验、扣库存、记录用户和claimId，并返回0～6。
+        return stringRedisTemplate.execute(seckillCouponLuaScript, List.of(ACTIVITY_KEY_TEMPLATE.formatted(couponId), CLAIMED_USERS_KEY_TEMPLATE.formatted(couponId), CLAIM_TRANSACTIONS_KEY_TEMPLATE.formatted(couponId)), String.valueOf(userId), claimId);
+    }
+
+    /**
+     * RocketMQ回查事务状态时确认指定领取流水是否已完成Redis预扣。
+     */
+    public boolean isClaimPreDeducted(Long couponId, Long userId, String claimId) {
+        if (couponId == null || userId == null || claimId == null || claimId.isBlank()) {
+            throw new IllegalArgumentException("优惠券ID、用户ID和领取流水ID不能为空");
+        }
+        Object reservedUserId = stringRedisTemplate.opsForHash().get(CLAIM_TRANSACTIONS_KEY_TEMPLATE.formatted(couponId), claimId);
+        return String.valueOf(userId).equals(reservedUserId);
     }
 }

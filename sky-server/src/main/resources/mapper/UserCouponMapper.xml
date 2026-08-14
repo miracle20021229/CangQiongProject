@@ -5,6 +5,7 @@
 
     <resultMap id="UserCouponVOMap" type="com.sky.vo.UserCouponVO">
         <id column="id" property="id"/>
+        <result column="claim_id" property="claimId"/>
         <result column="coupon_id" property="couponId"/>
         <result column="coupon_name" property="couponName"/>
         <result column="threshold_amount" property="thresholdAmount"/>
@@ -20,17 +21,15 @@
     <insert id="insert" parameterType="com.sky.entity.UserCoupon"
             useGeneratedKeys="true" keyProperty="id">
         insert into user_coupon
-            (coupon_id, user_id, status, claim_time, expire_time, use_time, order_id)
+            (claim_id, coupon_id, user_id, status, claim_time, expire_time, use_time, order_id)
         values
-            (#{couponId}, #{userId}, #{status}, #{claimTime}, #{expireTime}, #{useTime}, #{orderId})
+            (#{claimId}, #{couponId}, #{userId}, #{status}, #{claimTime}, #{expireTime}, #{useTime}, #{orderId})
     </insert>
 
-    <!-- 业务层领取前的一人一券检查，唯一索引负责最终并发兜底 -->
-    <select id="countByCouponIdAndUserId" resultType="java.lang.Integer">
-        select count(id)
+    <select id="getByClaimId" resultType="com.sky.entity.UserCoupon">
+        select *
         from user_coupon
-        where coupon_id = #{couponId}
-          and user_id = #{userId}
+        where claim_id = #{claimId}
     </select>
 
     <!-- 查询用户券包；未使用但已超过有效期的券直接展示为已过期 -->

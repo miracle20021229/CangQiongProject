@@ -69,6 +69,22 @@ public class SeckillCouponCompensationProducer {
     }
 
     /**
+     * 尝试发送Redis活动快照缺失修复消息。
+     */
+    public boolean trySendActivitySnapshotRepair(Long couponId, String reason) {
+        if (couponId == null) {
+            throw new IllegalArgumentException("发送活动修复补偿消息时couponId不能为空");
+        }
+        try {
+            send(CompensationType.ACTIVITY_SNAPSHOT_REPAIR, couponId, reason);
+            return true;
+        } catch (RuntimeException exception) {
+            log.error("RocketMQ活动修复补偿消息发送失败，couponId={}，reason={}，需要流程6对账兜底", couponId, reason, exception);
+            return false;
+        }
+    }
+
+    /**
      * 组装并同步发送补偿消息，发送结果非SEND_OK时抛出异常。
      */
     private void send(CompensationType type, Long couponId, String reason) {

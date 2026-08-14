@@ -16,6 +16,7 @@ public record SeckillCouponChangedEvent(
     public enum ChangeType {
         CREATED,
         UPDATED,
-        STATUS_CHANGED
+        STATUS_CHANGED,
+        ACTIVITY_REPAIR_REQUESTED
     }
 }

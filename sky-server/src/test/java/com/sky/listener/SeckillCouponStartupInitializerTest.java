@@ -47,14 +47,15 @@ class SeckillCouponStartupInitializerTest {
                         SeckillCoupon.builder().id(61L).build(),
                         SeckillCoupon.builder().id(62L).build()));
         doThrow(new IllegalStateException("redis unavailable"))
-                .when(cacheSyncService).synchronizeCouponActivity(61L);
-        when(compensationProducer.trySendActivitySnapshotSync(
+                .when(cacheSyncService).repairCouponActivity(61L);
+        when(cacheSyncService.repairCouponActivity(62L)).thenReturn(true);
+        when(compensationProducer.trySendActivitySnapshotRepair(
                 61L, "应用启动恢复Redis活动失败")).thenReturn(false);
 
         startupInitializer.initializeAfterStartup();
 
         verify(cacheSyncService).warmUpAvailableCouponCache();
-        verify(cacheSyncService).synchronizeCouponActivity(61L);
-        verify(cacheSyncService).synchronizeCouponActivity(62L);
+        verify(cacheSyncService).repairCouponActivity(61L);
+        verify(cacheSyncService).repairCouponActivity(62L);
     }
 }

@@ -78,6 +78,6 @@ class SeckillCouponAdminServiceImplTest {
         verify(seckillCouponMapper, never()).update(any(SeckillCoupon.class));
         verify(applicationEventPublisher).publishEvent(
                 new SeckillCouponChangedEvent(
-                        22L, SeckillCouponChangedEvent.ChangeType.STATUS_CHANGED));
+                        22L, SeckillCouponChangedEvent.ChangeType.ACTIVITY_REPAIR_REQUESTED));
     }
 }

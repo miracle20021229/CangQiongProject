@@ -10,7 +10,6 @@ import org.springframework.transaction.event.TransactionalEventListener;
 
 /**
  * 秒杀券数据变更后的缓存投影监听器。
- *
  * 只在MySQL事务提交成功后执行；Redis失败时发送RocketMQ补偿消息。
  */
 @Component
@@ -34,11 +33,14 @@ public class SeckillCouponCacheListener {
             case CREATED -> "新增秒杀券事务提交";
             case UPDATED -> "修改秒杀券事务提交";
             case STATUS_CHANGED -> "秒杀券状态事务提交";
+            case ACTIVITY_REPAIR_REQUESTED -> "重复启停请求修复Redis活动";
         };
         rebuildAvailableCacheWithCompensation(event, reason);
 
         if (SeckillCouponChangedEvent.ChangeType.STATUS_CHANGED.equals(event.changeType())) {
             synchronizeActivityWithCompensation(event.couponId(), reason);
+        } else if (SeckillCouponChangedEvent.ChangeType.ACTIVITY_REPAIR_REQUESTED.equals(event.changeType())) {
+            repairActivityWithCompensation(event.couponId(), reason);
         }
     }
 
@@ -64,6 +66,18 @@ public class SeckillCouponCacheListener {
         } catch (RuntimeException exception) {
             log.error("秒杀券变更后Redis活动同步失败，couponId={}", couponId, exception);
             compensationProducer.trySendActivitySnapshotSync(couponId, reason);
+        }
+    }
+
+    /**
+     * 仅在活动快照不完整时修复；失败时发送对应的RocketMQ补偿消息。
+     */
+    private void repairActivityWithCompensation(Long couponId, String reason) {
+        try {
+            seckillCouponCacheSyncService.repairCouponActivity(couponId);
+        } catch (RuntimeException exception) {
+            log.error("秒杀券Redis活动修复失败，couponId={}", couponId, exception);
+            compensationProducer.trySendActivitySnapshotRepair(couponId, reason);
         }
     }
 }

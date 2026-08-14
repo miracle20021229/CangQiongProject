@@ -49,6 +49,9 @@ sky:
     seckill-coupon-compensation:
       topic: ${SECKILL_COUPON_COMPENSATION_TOPIC:sky-seckill-coupon-compensation}
       consumer-group: ${SECKILL_COUPON_COMPENSATION_CONSUMER_GROUP:sky-seckill-coupon-compensation-consumer}
+    seckill-coupon-claim:
+      topic: ${SECKILL_COUPON_CLAIM_TOPIC:sky-seckill-coupon-claim}
+      consumer-group: ${SECKILL_COUPON_CLAIM_CONSUMER_GROUP:sky-seckill-coupon-claim-consumer}
   jwt:
     # 设置jwt签名加密时使用的秘钥
     admin-secret-key: itcast

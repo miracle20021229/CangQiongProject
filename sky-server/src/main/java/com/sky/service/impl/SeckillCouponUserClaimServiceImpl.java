@@ -1,89 +1,82 @@
 package com.sky.service.impl;
 
+import com.sky.constant.SeckillCouponClaimConstant;
 import com.sky.context.BaseContext;
-import com.sky.entity.SeckillCoupon;
-import com.sky.entity.UserCoupon;
 import com.sky.exception.CouponBusinessException;
-import com.sky.mapper.SeckillCouponMapper;
-import com.sky.mapper.UserCouponMapper;
+import com.sky.mq.message.SeckillCouponClaimMessage;
+import com.sky.mq.producer.SeckillCouponClaimProducer;
 import com.sky.service.SeckillCouponUserClaimService;
-import com.sky.service.support.SeckillCouponFinder;
-import com.sky.service.support.SeckillCouponValidator;
-import org.springframework.dao.DuplicateKeyException;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
+import java.util.UUID;
 
 /**
  * 用户端秒杀券领取用例实现。
  */
 @Service
-public class SeckillCouponUserClaimServiceImpl
-        implements SeckillCouponUserClaimService {
+@Slf4j
+public class SeckillCouponUserClaimServiceImpl implements SeckillCouponUserClaimService {
 
-    private final SeckillCouponMapper seckillCouponMapper;
-    private final UserCouponMapper userCouponMapper;
-    private final SeckillCouponFinder seckillCouponFinder;
-    private final SeckillCouponValidator seckillCouponValidator;
+    private static final int MESSAGE_SCHEMA_VERSION = 1;
+    private final SeckillCouponClaimProducer claimProducer;
 
-    public SeckillCouponUserClaimServiceImpl(
-            SeckillCouponMapper seckillCouponMapper,
-            UserCouponMapper userCouponMapper,
-            SeckillCouponFinder seckillCouponFinder,
-            SeckillCouponValidator seckillCouponValidator) {
-        this.seckillCouponMapper = seckillCouponMapper;
-        this.userCouponMapper = userCouponMapper;
-        this.seckillCouponFinder = seckillCouponFinder;
-        this.seckillCouponValidator = seckillCouponValidator;
+    public SeckillCouponUserClaimServiceImpl(SeckillCouponClaimProducer claimProducer) {
+        this.claimProducer = claimProducer;
     }
 
     /**
-     * 当前保留MySQL同步事务基线。
-     * 流程3、4将在该独立用例内替换为Lua预扣、MQ投递和消费者独立落库事务。
+     * 流程3-步骤1～3：准备领取消息并调用Producer；步骤12的Lua结果返回后再转换为业务结果。
      */
     @Override
-    @Transactional
-    public Long claim(Long couponId) {
+    public String claim(Long couponId) {
+        // 步骤1的入口准备：校验请求并取得当前登录用户，尚未进入Redis或MQ。
         if (couponId == null) {
             throw new CouponBusinessException("秒杀券ID不能为空");
         }
-
         Long userId = BaseContext.getCurrentIdOrThrow();
-        LocalDateTime now = LocalDateTime.now();
-        SeckillCoupon coupon = seckillCouponFinder.getByIdOrThrow(couponId);
+        String claimId = UUID.randomUUID().toString();
 
-        // TODO 流程3：请求入口改为从Redis读取活动并执行Lua，避免秒杀请求先访问MySQL。
-        seckillCouponValidator.validateClaimable(coupon, now);
-
-        Integer claimedCount =
-                userCouponMapper.countByCouponIdAndUserId(couponId, userId);
-        if (claimedCount != null && claimedCount > 0) {
-            throw new CouponBusinessException("每位用户限领一张，请勿重复领取");
-        }
-
-        // TODO 流程3：Lua成功后发送MQ并立即返回领取流水ID。
-        // TODO 流程4：将条件扣库存和新增用户券移动到MQ消费者调用的独立事务Service。
-        int affectedRows = seckillCouponMapper.decreaseStock(couponId, now);
-        if (affectedRows != 1) {
-            throw new CouponBusinessException("秒杀券已抢完或活动状态已变化，请刷新后重试");
-        }
-
-        UserCoupon userCoupon = UserCoupon.builder()
+        // 流程3-步骤2：生成跨Producer、Broker和Consumer传递的领取消息，claimId贯穿流程3和流程4。
+        SeckillCouponClaimMessage message = SeckillCouponClaimMessage.builder()
+                .schemaVersion(MESSAGE_SCHEMA_VERSION)
+                .claimId(claimId)
                 .couponId(couponId)
                 .userId(userId)
-                .status(UserCoupon.UNUSED)
-                .claimTime(now)
-                .expireTime(coupon.getClaimEndTime())
+                .claimedAt(System.currentTimeMillis())
                 .build();
 
+        Long result;
         try {
-            userCouponMapper.insert(userCoupon);
-        } catch (DuplicateKeyException exception) {
-            // 唯一索引uk_coupon_user是并发场景下“一人一券”的最终兜底。
-            throw new CouponBusinessException("每位用户限领一张，请勿重复领取");
+            // 流程3-步骤3：调用Producer发送事务消息；当前请求会等待步骤7～12的本地事务回调结束。
+            result = claimProducer.sendInTransaction(message);
+        } catch (RuntimeException exception) {
+            log.error("秒杀券领取请求提交失败，claimId={}，couponId={}，userId={}", claimId, couponId, userId, exception);
+            throw new CouponBusinessException("领取请求提交失败，请稍后查询券包或重试");
         }
 
-        return userCoupon.getId();
+        // 流程3-步骤12的结果回到业务层：Lua成功返回claimId，其他返回码转换为对应业务异常。
+        if (SeckillCouponClaimConstant.SUCCESS.equals(result)) {
+            return claimId;
+        }
+        if (SeckillCouponClaimConstant.OUT_OF_STOCK.equals(result)) {
+            throw new CouponBusinessException("秒杀券已抢完");
+        }
+        if (SeckillCouponClaimConstant.DUPLICATE_CLAIM.equals(result)) {
+            throw new CouponBusinessException("每位用户限领一张，请勿重复领取");
+        }
+        if (SeckillCouponClaimConstant.ACTIVITY_NOT_INITIALIZED.equals(result)) {
+            throw new CouponBusinessException("秒杀活动数据正在恢复，请稍后重试");
+        }
+        if (SeckillCouponClaimConstant.ACTIVITY_DISABLED.equals(result)) {
+            throw new CouponBusinessException("秒杀活动已停用");
+        }
+        if (SeckillCouponClaimConstant.ACTIVITY_NOT_STARTED.equals(result)) {
+            throw new CouponBusinessException("秒杀活动尚未开始");
+        }
+        if (SeckillCouponClaimConstant.ACTIVITY_ENDED.equals(result)) {
+            throw new CouponBusinessException("秒杀活动已结束");
+        }
+        throw new CouponBusinessException("秒杀活动状态异常，请稍后重试");
     }
 }

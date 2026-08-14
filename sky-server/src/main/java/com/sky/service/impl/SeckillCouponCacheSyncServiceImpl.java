@@ -1,5 +1,6 @@
 package com.sky.service.impl;
 
+import com.sky.constant.StatusConstant;
 import com.sky.entity.SeckillCoupon;
 import com.sky.mapper.SeckillCouponMapper;
 import com.sky.redis.SeckillCouponRedisRepository;
@@ -59,7 +60,7 @@ public class SeckillCouponCacheSyncServiceImpl implements SeckillCouponCacheSync
     }
 
     /**
-     * 重新查询MySQL并覆盖指定秒杀券的Redis活动快照。
+     * 状态发生变化时重新查询MySQL：启用则完整初始化，停用则只更新状态。
      */
     @Override
     public void synchronizeCouponActivity(Long couponId) {
@@ -72,8 +73,34 @@ public class SeckillCouponCacheSyncServiceImpl implements SeckillCouponCacheSync
             throw new IllegalStateException("同步Redis活动失败，秒杀券不存在，couponId=" + couponId);
         }
 
-        seckillCouponRedisRepository.syncActivity(coupon);
+        if (StatusConstant.ENABLE.equals(coupon.getStatus())) {
+            seckillCouponRedisRepository.initializeActivity(coupon);
+        } else {
+            seckillCouponRedisRepository.updateActivityStatus(coupon.getId(), coupon.getStatus());
+        }
         log.info("Redis秒杀活动同步完成，couponId={}，status={}",
                 coupon.getId(), coupon.getStatus());
+    }
+
+    /**
+     * 快照完整时保留Redis现场，缺失或损坏时才按MySQL重建。
+     */
+    @Override
+    public boolean repairCouponActivity(Long couponId) {
+        if (couponId == null) {
+            throw new IllegalArgumentException("修复Redis活动快照时couponId不能为空");
+        }
+
+        SeckillCoupon coupon = seckillCouponMapper.getById(couponId);
+        if (coupon == null) {
+            throw new IllegalStateException("修复Redis活动失败，秒杀券不存在，couponId=" + couponId);
+        }
+        if (seckillCouponRedisRepository.isActivityComplete(couponId)) {
+            return false;
+        }
+
+        seckillCouponRedisRepository.initializeActivity(coupon);
+        log.info("Redis秒杀活动快照不完整，已按MySQL修复，couponId={}", couponId);
+        return true;
     }
 }

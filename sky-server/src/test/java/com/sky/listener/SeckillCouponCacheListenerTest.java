@@ -72,4 +72,28 @@ class SeckillCouponCacheListenerTest {
 
         verify(cacheSyncService).synchronizeCouponActivity(53L);
     }
+
+    @Test
+    void shouldRepairActivityWithoutOverwritingCompleteSnapshot() {
+        when(cacheSyncService.rebuildAvailableCouponCache()).thenReturn(1);
+
+        cacheListener.onCouponChanged(new SeckillCouponChangedEvent(
+                54L, SeckillCouponChangedEvent.ChangeType.ACTIVITY_REPAIR_REQUESTED));
+
+        verify(cacheSyncService).repairCouponActivity(54L);
+        verify(cacheSyncService, never()).synchronizeCouponActivity(54L);
+    }
+
+    @Test
+    void shouldSendRepairCompensationWhenActivityRepairFails() {
+        when(cacheSyncService.rebuildAvailableCouponCache()).thenReturn(1);
+        doThrow(new IllegalStateException("redis unavailable"))
+                .when(cacheSyncService).repairCouponActivity(55L);
+
+        cacheListener.onCouponChanged(new SeckillCouponChangedEvent(
+                55L, SeckillCouponChangedEvent.ChangeType.ACTIVITY_REPAIR_REQUESTED));
+
+        verify(compensationProducer).trySendActivitySnapshotRepair(
+                55L, "重复启停请求修复Redis活动");
+    }
 }

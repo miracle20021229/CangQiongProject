@@ -25,6 +25,8 @@ public class UserCoupon implements Serializable {
 
     private Long id;
 
+    private String claimId;
+
     private Long couponId;
 
     private Long userId;

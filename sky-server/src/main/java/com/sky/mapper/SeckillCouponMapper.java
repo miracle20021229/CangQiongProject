@@ -67,11 +67,7 @@ public interface SeckillCouponMapper {
     List<SeckillCoupon> listEnabledNotEnded(@Param("now") LocalDateTime now);
 
     /**
-     * 在状态、时间和库存均符合条件时原子扣减一张数据库库存。
-     *
-     * @param id  秒杀券ID
-     * @param now 当前时间
-     * @return 受影响行数，1表示扣减成功，0表示活动不可领取或库存不足
+     * Lua预扣成功后扣减MySQL库存，不再按MQ消费时刻重复判断活动状态和时间。
      */
-    int decreaseStock(@Param("id") Long id, @Param("now") LocalDateTime now);
+    int decreaseStockAfterPreDeduct(@Param("id") Long id);
 }

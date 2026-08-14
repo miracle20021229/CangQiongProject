@@ -42,11 +42,12 @@ public class SeckillCouponStartupInitializer {
         int restoredCount = 0;
         for (SeckillCoupon coupon : enabledCoupons) {
             try {
-                seckillCouponCacheSyncService.synchronizeCouponActivity(coupon.getId());
-                restoredCount++;
+                if (seckillCouponCacheSyncService.repairCouponActivity(coupon.getId())) {
+                    restoredCount++;
+                }
             } catch (RuntimeException exception) {
                 log.error("Redis秒杀活动恢复失败，couponId={}", coupon.getId(), exception);
-                compensationProducer.trySendActivitySnapshotSync(
+                compensationProducer.trySendActivitySnapshotRepair(
                         coupon.getId(), "应用启动恢复Redis活动失败");
             }
         }

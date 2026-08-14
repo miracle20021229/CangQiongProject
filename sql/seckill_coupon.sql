@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS `seckill_coupon` (
 
 CREATE TABLE IF NOT EXISTS `user_coupon` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `claim_id` varchar(36) NOT NULL COMMENT '领取流水ID',
   `coupon_id` bigint NOT NULL COMMENT '秒杀券id',
   `user_id` bigint NOT NULL COMMENT '用户id',
   `status` tinyint NOT NULL DEFAULT '0' COMMENT '状态：0未使用，1已使用，2已过期',
@@ -29,6 +30,7 @@ CREATE TABLE IF NOT EXISTS `user_coupon` (
   `use_time` datetime DEFAULT NULL COMMENT '使用时间',
   `order_id` bigint DEFAULT NULL COMMENT '使用该券的外卖订单id',
   PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_claim_id` (`claim_id`),
   UNIQUE KEY `uk_coupon_user` (`coupon_id`, `user_id`),
   KEY `idx_user_status` (`user_id`, `status`),
   KEY `idx_order_id` (`order_id`)

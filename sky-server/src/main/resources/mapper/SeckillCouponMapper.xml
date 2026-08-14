@@ -102,16 +102,12 @@
         order by id asc
     </select>
 
-    <!-- 条件更新保证数据库库存不会在并发领取时被扣成负数 -->
-    <update id="decreaseStock">
+    <update id="decreaseStockAfterPreDeduct">
         update seckill_coupon
         set remaining_stock = remaining_stock - 1,
             update_time = now()
         where id = #{id}
-          and status = 1
           and remaining_stock &gt; 0
-          and claim_start_time &lt;= #{now}
-          and claim_end_time &gt; #{now}
     </update>
 
 </mapper>

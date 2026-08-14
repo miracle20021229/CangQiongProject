@@ -84,6 +84,13 @@ class SeckillCouponCompensationRocketMqIntegrationTest {
             consumed.countDown();
         }
 
+        @Override
+        public boolean repairCouponActivity(Long couponId) {
+            this.couponId = couponId;
+            consumed.countDown();
+            return true;
+        }
+
         boolean await(long timeout, TimeUnit timeUnit) throws InterruptedException {
             return consumed.await(timeout, timeUnit);
         }

@@ -64,6 +64,11 @@ public class SeckillCouponCompensationMessage implements Serializable {
         /**
          * 按数据库最新状态重新同步秒杀活动快照。
          */
-        ACTIVITY_SNAPSHOT_SYNC
+        ACTIVITY_SNAPSHOT_SYNC,
+
+        /**
+         * 仅在秒杀活动快照不完整时按数据库修复。
+         */
+        ACTIVITY_SNAPSHOT_REPAIR
     }
 }

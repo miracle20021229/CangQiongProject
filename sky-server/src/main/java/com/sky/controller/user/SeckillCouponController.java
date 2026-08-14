@@ -46,12 +46,13 @@ public class SeckillCouponController {
     }
 
     /**
-     * 当前登录用户领取指定秒杀券。
+     * 流程3-步骤1：接收领取请求并调用用户领取用例，Controller不处理Redis和MQ细节。
      */
     @PostMapping("/claim/{id}")
     @ApiOperation("领取秒杀券")
-    public Result<Long> claim(@PathVariable("id") Long couponId) {
+    public Result<String> claim(@PathVariable("id") Long couponId) {
         log.info("用户领取秒杀券，秒杀券ID：{}", couponId);
+        // 流程3-步骤1：调用领取Service，箭头下一站是SeckillCouponUserClaimService.claim()。
         return Result.success(seckillCouponUserClaimService.claim(couponId));
     }
 

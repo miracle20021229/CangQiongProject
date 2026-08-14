@@ -19,9 +19,9 @@ public interface UserCouponMapper {
     void insert(UserCoupon userCoupon);
 
     /**
-     * 查询用户是否已经领取过指定秒杀券。
+     * 根据领取流水ID查询已落库记录，用于MQ重复消费幂等判断。
      */
-    Integer countByCouponIdAndUserId(@Param("couponId") Long couponId, @Param("userId") Long userId);
+    UserCoupon getByClaimId(@Param("claimId") String claimId);
 
     /**
      * 查询指定用户领取过的全部秒杀券。

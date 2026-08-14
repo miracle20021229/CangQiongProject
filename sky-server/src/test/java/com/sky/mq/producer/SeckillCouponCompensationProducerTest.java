@@ -76,6 +76,19 @@ class SeckillCouponCompensationProducerTest {
         assertFalse(producer.trySendAvailableCacheRebuild("test"));
     }
 
+    @Test
+    void shouldSendActivityRepairMessage() {
+        when(rocketMQTemplate.syncSend(anyString(), any(Message.class)))
+                .thenReturn(sendResult);
+        when(sendResult.getSendStatus()).thenReturn(SendStatus.SEND_OK);
+
+        assertTrue(producer.trySendActivitySnapshotRepair(9L, "repair"));
+
+        verify(rocketMQTemplate).syncSend(
+                eq(TOPIC + ":" + CompensationType.ACTIVITY_SNAPSHOT_REPAIR.name()),
+                any(Message.class));
+    }
+
     /**
      * 业务参数错误应直接抛出，不能作为RocketMQ技术故障吞掉。
      */

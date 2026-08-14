@@ -3,15 +3,12 @@ package com.sky.service;
 /**
  * 用户端秒杀券领取用例。
  *
- * 当前保留MySQL同步事务基线；流程3、4将在该边界内接入Lua、MQ和独立落库事务。
+ * 流程3负责Lua原子预扣和事务消息提交，流程4由MQ消费者异步落库。
  */
 public interface SeckillCouponUserClaimService {
 
     /**
      * 当前用户领取指定秒杀券。
-     *
-     * @param couponId 秒杀券ID
-     * @return 用户领券记录ID
      */
-    Long claim(Long couponId);
+    String claim(Long couponId);
 }

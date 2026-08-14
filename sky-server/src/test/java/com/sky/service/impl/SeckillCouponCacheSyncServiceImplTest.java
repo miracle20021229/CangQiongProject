@@ -41,7 +41,7 @@ class SeckillCouponCacheSyncServiceImplTest {
     }
 
     @Test
-    void shouldRequeryMysqlBeforeSynchronizingActivity() {
+    void shouldInitializeEnabledActivityFromMysql() {
         SeckillCoupon coupon = SeckillCoupon.builder()
                 .id(31L)
                 .status(1)
@@ -50,15 +50,58 @@ class SeckillCouponCacheSyncServiceImplTest {
 
         cacheSyncService.synchronizeCouponActivity(31L);
 
-        verify(seckillCouponRedisRepository).syncActivity(coupon);
+        verify(seckillCouponRedisRepository).initializeActivity(coupon);
+    }
+
+    @Test
+    void shouldOnlyUpdateStatusWhenActivityIsDisabled() {
+        SeckillCoupon coupon = SeckillCoupon.builder()
+                .id(32L)
+                .status(0)
+                .build();
+        when(seckillCouponMapper.getById(32L)).thenReturn(coupon);
+
+        cacheSyncService.synchronizeCouponActivity(32L);
+
+        verify(seckillCouponRedisRepository).updateActivityStatus(32L, 0);
+    }
+
+    @Test
+    void shouldKeepCompleteActivitySnapshotDuringRepair() {
+        SeckillCoupon coupon = SeckillCoupon.builder()
+                .id(33L)
+                .status(1)
+                .build();
+        when(seckillCouponMapper.getById(33L)).thenReturn(coupon);
+        when(seckillCouponRedisRepository.isActivityComplete(33L)).thenReturn(true);
+
+        boolean repaired = cacheSyncService.repairCouponActivity(33L);
+
+        assertEquals(false, repaired);
+        verify(seckillCouponRedisRepository, org.mockito.Mockito.never()).initializeActivity(coupon);
+    }
+
+    @Test
+    void shouldInitializeIncompleteActivityDuringRepair() {
+        SeckillCoupon coupon = SeckillCoupon.builder()
+                .id(34L)
+                .status(1)
+                .build();
+        when(seckillCouponMapper.getById(34L)).thenReturn(coupon);
+        when(seckillCouponRedisRepository.isActivityComplete(34L)).thenReturn(false);
+
+        boolean repaired = cacheSyncService.repairCouponActivity(34L);
+
+        assertEquals(true, repaired);
+        verify(seckillCouponRedisRepository).initializeActivity(coupon);
     }
 
     @Test
     void shouldFailForMissingCouponSoRocketMqCanRetry() {
-        when(seckillCouponMapper.getById(32L)).thenReturn(null);
+        when(seckillCouponMapper.getById(35L)).thenReturn(null);
 
         assertThrows(IllegalStateException.class,
-                () -> cacheSyncService.synchronizeCouponActivity(32L));
+                () -> cacheSyncService.synchronizeCouponActivity(35L));
     }
 
     @Test

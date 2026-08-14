@@ -1,24 +1,22 @@
 package com.sky.service.impl;
 
+import com.sky.constant.SeckillCouponClaimConstant;
 import com.sky.context.BaseContext;
-import com.sky.entity.SeckillCoupon;
-import com.sky.entity.UserCoupon;
-import com.sky.mapper.SeckillCouponMapper;
-import com.sky.mapper.UserCouponMapper;
-import com.sky.service.support.SeckillCouponFinder;
-import com.sky.service.support.SeckillCouponValidator;
+import com.sky.exception.CouponBusinessException;
+import com.sky.mq.message.SeckillCouponClaimMessage;
+import com.sky.mq.producer.SeckillCouponClaimProducer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.time.LocalDateTime;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -26,23 +24,13 @@ import static org.mockito.Mockito.when;
 class SeckillCouponUserClaimServiceImplTest {
 
     @Mock
-    private SeckillCouponMapper seckillCouponMapper;
-    @Mock
-    private UserCouponMapper userCouponMapper;
-    @Mock
-    private SeckillCouponFinder seckillCouponFinder;
-    @Mock
-    private SeckillCouponValidator seckillCouponValidator;
+    private SeckillCouponClaimProducer claimProducer;
 
     private SeckillCouponUserClaimServiceImpl claimService;
 
     @BeforeEach
     void setUp() {
-        claimService = new SeckillCouponUserClaimServiceImpl(
-                seckillCouponMapper,
-                userCouponMapper,
-                seckillCouponFinder,
-                seckillCouponValidator);
+        claimService = new SeckillCouponUserClaimServiceImpl(claimProducer);
         BaseContext.setCurrentId(41L);
     }
 
@@ -52,30 +40,34 @@ class SeckillCouponUserClaimServiceImplTest {
     }
 
     @Test
-    void shouldKeepMysqlTransactionClaimBaselineAfterExtraction() {
-        SeckillCoupon coupon = SeckillCoupon.builder()
-                .id(42L)
-                .claimEndTime(LocalDateTime.now().plusHours(1))
-                .build();
-        when(seckillCouponFinder.getByIdOrThrow(42L)).thenReturn(coupon);
-        when(userCouponMapper.countByCouponIdAndUserId(42L, 41L)).thenReturn(0);
-        when(seckillCouponMapper.decreaseStock(
-                org.mockito.ArgumentMatchers.eq(42L),
-                org.mockito.ArgumentMatchers.any())).thenReturn(1);
-        doAnswer(invocation -> {
-            UserCoupon userCoupon = invocation.getArgument(0);
-            userCoupon.setId(43L);
-            return null;
-        }).when(userCouponMapper).insert(any(UserCoupon.class));
+    void shouldReturnClaimIdAfterTransactionMessageCommits() {
+        when(claimProducer.sendInTransaction(any(SeckillCouponClaimMessage.class))).thenReturn(SeckillCouponClaimConstant.SUCCESS);
 
-        Long userCouponId = claimService.claim(42L);
+        String claimId = claimService.claim(42L);
 
-        assertEquals(43L, userCouponId);
-        verify(seckillCouponValidator).validateClaimable(
-                org.mockito.ArgumentMatchers.eq(coupon),
-                org.mockito.ArgumentMatchers.any());
-        verify(seckillCouponMapper).decreaseStock(
-                org.mockito.ArgumentMatchers.eq(42L),
-                org.mockito.ArgumentMatchers.any());
+        assertFalse(claimId.isBlank());
+        ArgumentCaptor<SeckillCouponClaimMessage> messageCaptor = ArgumentCaptor.forClass(SeckillCouponClaimMessage.class);
+        verify(claimProducer).sendInTransaction(messageCaptor.capture());
+        assertEquals(claimId, messageCaptor.getValue().getClaimId());
+        assertEquals(42L, messageCaptor.getValue().getCouponId());
+        assertEquals(41L, messageCaptor.getValue().getUserId());
+    }
+
+    @Test
+    void shouldTranslateDuplicateLuaResult() {
+        when(claimProducer.sendInTransaction(any(SeckillCouponClaimMessage.class))).thenReturn(SeckillCouponClaimConstant.DUPLICATE_CLAIM);
+
+        CouponBusinessException exception = assertThrows(CouponBusinessException.class, () -> claimService.claim(42L));
+
+        assertEquals("每位用户限领一张，请勿重复领取", exception.getMessage());
+    }
+
+    @Test
+    void shouldHideProducerFailureBehindBusinessException() {
+        when(claimProducer.sendInTransaction(any(SeckillCouponClaimMessage.class))).thenThrow(new IllegalStateException("broker unavailable"));
+
+        CouponBusinessException exception = assertThrows(CouponBusinessException.class, () -> claimService.claim(42L));
+
+        assertEquals("领取请求提交失败，请稍后查询券包或重试", exception.getMessage());
     }
 }

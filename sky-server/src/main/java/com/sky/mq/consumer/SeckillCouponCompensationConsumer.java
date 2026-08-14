@@ -17,7 +17,7 @@ import org.springframework.util.StringUtils;
 @RocketMQMessageListener(
         topic = "${sky.rocketmq.seckill-coupon-compensation.topic:sky-seckill-coupon-compensation}",
         consumerGroup = "${sky.rocketmq.seckill-coupon-compensation.consumer-group:sky-seckill-coupon-compensation-consumer}",
-        selectorExpression = "AVAILABLE_CACHE_REBUILD || ACTIVITY_SNAPSHOT_SYNC",
+        selectorExpression = "AVAILABLE_CACHE_REBUILD || ACTIVITY_SNAPSHOT_SYNC || ACTIVITY_SNAPSHOT_REPAIR",
         consumeThreadNumber = 2,
         consumeThreadMax = 8,
         maxReconsumeTimes = 5
@@ -45,6 +45,8 @@ public class SeckillCouponCompensationConsumer implements RocketMQListener<Secki
                 cacheSyncService.rebuildAvailableCouponCache();
             } else if (CompensationType.ACTIVITY_SNAPSHOT_SYNC.equals(message.getType())) {
                 cacheSyncService.synchronizeCouponActivity(message.getCouponId());
+            } else if (CompensationType.ACTIVITY_SNAPSHOT_REPAIR.equals(message.getType())) {
+                cacheSyncService.repairCouponActivity(message.getCouponId());
             } else {
                 throw new IllegalArgumentException("不支持的秒杀券补偿类型：" + message.getType());
             }
@@ -74,7 +76,8 @@ public class SeckillCouponCompensationConsumer implements RocketMQListener<Secki
         if (message.getType() == null) {
             throw new IllegalArgumentException("秒杀券补偿消息type不能为空");
         }
-        if (CompensationType.ACTIVITY_SNAPSHOT_SYNC.equals(message.getType())
+        if ((CompensationType.ACTIVITY_SNAPSHOT_SYNC.equals(message.getType())
+                || CompensationType.ACTIVITY_SNAPSHOT_REPAIR.equals(message.getType()))
                 && message.getCouponId() == null) {
             throw new IllegalArgumentException("活动快照补偿消息couponId不能为空");
         }

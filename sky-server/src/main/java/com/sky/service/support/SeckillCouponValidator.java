@@ -1,14 +1,11 @@
 package com.sky.service.support;
 
-import com.sky.constant.StatusConstant;
 import com.sky.dto.SeckillCouponDTO;
-import com.sky.entity.SeckillCoupon;
 import com.sky.exception.CouponBusinessException;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
 
 /**
  * 秒杀券业务规则校验器。
@@ -29,24 +26,6 @@ public class SeckillCouponValidator {
      */
     public void validateForUpdate(SeckillCouponDTO seckillCouponDTO) {
         validateCoupon(seckillCouponDTO, true);
-    }
-
-    /**
-     * 校验秒杀券是否允许领取。
-     */
-    public void validateClaimable(SeckillCoupon coupon, LocalDateTime now) {
-        if (!StatusConstant.ENABLE.equals(coupon.getStatus())) {
-            throw new CouponBusinessException("秒杀券未启用");
-        }
-        if (coupon.getClaimStartTime() == null || now.isBefore(coupon.getClaimStartTime())) {
-            throw new CouponBusinessException("秒杀券领取活动尚未开始");
-        }
-        if (coupon.getClaimEndTime() == null || !now.isBefore(coupon.getClaimEndTime())) {
-            throw new CouponBusinessException("秒杀券领取活动已结束");
-        }
-        if (coupon.getRemainingStock() == null || coupon.getRemainingStock() <= 0) {
-            throw new CouponBusinessException("秒杀券已抢完");
-        }
     }
 
     /**

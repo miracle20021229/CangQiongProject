@@ -38,6 +38,16 @@ class SeckillCouponCompensationConsumerTest {
     }
 
     @Test
+    void shouldRouteActivityRepairMessageByCouponId() {
+        SeckillCouponCompensationMessage message = message(
+                CompensationType.ACTIVITY_SNAPSHOT_REPAIR, 10L);
+
+        consumer.onMessage(message);
+
+        verify(cacheSyncService).repairCouponActivity(10L);
+    }
+
+    @Test
     void shouldRethrowBusinessFailureForRocketMqRetry() {
         SeckillCouponCompensationMessage message = message(
                 CompensationType.AVAILABLE_CACHE_REBUILD, null);
