@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.sky.seckill.mapper.UserCouponMapper">
+
+    <resultMap id="UserCouponVOMap" type="com.sky.vo.UserCouponVO">
+        <id column="id" property="id"/>
+        <result column="claim_id" property="claimId"/>
+        <result column="coupon_id" property="couponId"/>
+        <result column="coupon_name" property="couponName"/>
+        <result column="threshold_amount" property="thresholdAmount"/>
+        <result column="discount_amount" property="discountAmount"/>
+        <result column="status" property="status"/>
+        <result column="claim_time" property="claimTime"/>
+        <result column="expire_time" property="expireTime"/>
+        <result column="use_time" property="useTime"/>
+        <result column="order_id" property="orderId"/>
+    </resultMap>
+
+    <!-- 新增用户领券记录并回填自增主键 -->
+    <insert id="insert" parameterType="com.sky.entity.UserCoupon"
+            useGeneratedKeys="true" keyProperty="id">
+        insert into user_coupon
+            (claim_id, coupon_id, user_id, status, claim_time, expire_time, use_time, order_id)
+        values
+            (#{claimId}, #{couponId}, #{userId}, #{status}, #{claimTime}, #{expireTime}, #{useTime}, #{orderId})
+    </insert>
+
+    <select id="getByClaimId" resultType="com.sky.entity.UserCoupon">
+        select *
+        from user_coupon
+        where claim_id = #{claimId}
+    </select>
+
+    <select id="getByCouponIdAndUserId" resultType="com.sky.entity.UserCoupon">
+        select *
+        from user_coupon
+        where coupon_id = #{couponId}
+          and user_id = #{userId}
+    </select>
+
+    <!-- 用户侧状态查询必须同时匹配claimId和当前用户，避免跨用户读取领取结果。 -->
+    <select id="getByClaimIdAndUserId" resultType="com.sky.entity.UserCoupon">
+        select *
+        from user_coupon
+        where claim_id = #{claimId}
+          and user_id = #{userId}
+    </select>
+
+    <!-- 流程6C按券统计最终落库领取数量。 -->
+    <select id="countByCouponId" resultType="long">
+        select count(*)
+        from user_coupon
+        where coupon_id = #{couponId}
+    </select>
+
+    <!-- 查询用户券包；未使用但已超过有效期的券直接展示为已过期 -->
+    <select id="listByUserId" resultMap="UserCouponVOMap">
+        select uc.id,
+               uc.coupon_id,
+               sc.name as coupon_name,
+               sc.threshold_amount,
+               sc.discount_amount,
+               case
+                   when uc.status = 0
+                       and uc.expire_time is not null
+                       and uc.expire_time &lt;= now() then 2
+                   else uc.status
+               end as status,
+               uc.claim_time,
+               uc.expire_time,
+               uc.use_time,
+               uc.order_id
+        from user_coupon uc
+        inner join seckill_coupon sc on sc.id = uc.coupon_id
+        where uc.user_id = #{userId}
+        order by uc.claim_time desc
+    </select>
+
+</mapper>

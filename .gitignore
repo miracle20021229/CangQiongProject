@@ -8,6 +8,7 @@
 generated-food-images/
 tmp-image-resource-review/
 tmp-image-upload-test/
+sky-server/src/main/resources/application-dev.yml
 
 # 秒杀券流程测试需要进入版本管理
 !sky-server/src/test/

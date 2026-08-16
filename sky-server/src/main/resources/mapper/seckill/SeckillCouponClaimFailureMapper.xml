@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.sky.seckill.mapper.SeckillCouponClaimFailureMapper">
+
+    <!-- failure_id 保证消费转发的至少一次语义不会产生重复治理记录。 -->
+    <insert id="upsertFinalFailure" parameterType="com.sky.entity.SeckillCouponClaimFailure">
+        insert into seckill_coupon_claim_failure
+            (failure_id, source_message_id, source_topic, claim_id, coupon_id, user_id,
+             action, status, error_code, error_message, message_body,
+             delivery_attempts, reconcile_attempts, repair_attempts, next_reconcile_time,
+             occurred_time, create_time, update_time)
+        values
+            (#{failureId}, #{sourceMessageId}, #{sourceTopic}, #{claimId}, #{couponId}, #{userId},
+             #{action}, #{status}, #{errorCode}, #{errorMessage}, #{messageBody},
+             #{deliveryAttempts}, 0, 0, now(), #{occurredTime}, now(), now())
+        on duplicate key update
+            source_message_id = coalesce(source_message_id, values(source_message_id)),
+            source_topic = coalesce(source_topic, values(source_topic)),
+            claim_id = coalesce(claim_id, values(claim_id)),
+            coupon_id = coalesce(coupon_id, values(coupon_id)),
+            user_id = coalesce(user_id, values(user_id)),
+            action = values(action),
+            error_code = values(error_code),
+            error_message = values(error_message),
+            message_body = values(message_body),
+            delivery_attempts = greatest(delivery_attempts, values(delivery_attempts)),
+            occurred_time = least(occurred_time, values(occurred_time)),
+            resolved_time = if(status = 'RESOLVED', resolved_time, null),
+            next_reconcile_time = if(
+                status in ('PROCESSING', 'RECHECK_PENDING', 'REPAIR_PENDING', 'REPAIRING', 'MANUAL_REQUIRED', 'RESOLVED'),
+                next_reconcile_time,
+                now()
+            ),
+            status = if(status in ('PROCESSING', 'RECHECK_PENDING', 'REPAIR_PENDING', 'REPAIRING', 'MANUAL_REQUIRED', 'RESOLVED'),
+                        status, values(status)),
+            update_time = now()
+    </insert>
+
+    <!-- 正常待对账记录经过短暂等待后执行；PROCESSING超时记录允许其他实例接管。 -->
+    <select id="listReconciliationCandidates" resultType="com.sky.entity.SeckillCouponClaimFailure">
+        select *
+        from seckill_coupon_claim_failure
+        where (
+            status in ('RECONCILE_PENDING', 'DEAD_LETTERED', 'RECHECK_PENDING')
+            and update_time &lt;= #{readyBefore}
+            and coalesce(next_reconcile_time, update_time) &lt;= #{now}
+        ) or (
+            status = 'PROCESSING'
+            and (
+                processing_deadline &lt;= #{now}
+                or (processing_deadline is null and update_time &lt;= #{leaseExpiredBefore})
+            )
+        )
+        order by update_time asc, id asc
+        limit #{limit}
+    </select>
+
+    <!-- 状态CAS保证同一失败记录只能被一个应用实例抢占。 -->
+    <update id="tryStartPendingReconciliation">
+        update seckill_coupon_claim_failure
+        set status = 'PROCESSING',
+            reconcile_attempts = reconcile_attempts + 1,
+            next_reconcile_time = null,
+            processing_deadline = #{processingDeadline},
+            processing_token = #{processingToken},
+            update_time = now()
+        where id = #{id}
+          and status = #{expectedStatus}
+    </update>
+
+    <!-- PROCESSING租约超时后允许接管，防止应用宕机造成永久卡死。 -->
+    <update id="tryReclaimExpiredReconciliation">
+        update seckill_coupon_claim_failure
+        set reconcile_attempts = reconcile_attempts + 1,
+            processing_deadline = #{processingDeadline},
+            processing_token = #{processingToken},
+            update_time = now()
+        where id = #{id}
+          and status = 'PROCESSING'
+          and (
+              processing_deadline &lt;= #{now}
+              or (processing_deadline is null and update_time &lt;= #{legacyLeaseExpiredBefore})
+          )
+    </update>
+
+    <!-- 只有抢占成功的PROCESSING记录才能提交判定结果。 -->
+    <update id="completeReconciliation">
+        update seckill_coupon_claim_failure
+        set status = #{targetStatus},
+            next_reconcile_time = #{nextReconcileTime},
+            processing_deadline = null,
+            processing_token = null,
+            resolution_code = #{resolutionCode},
+            resolution_message = #{resolutionMessage},
+            resolved_time = case when #{targetStatus} = 'RESOLVED' then now() else null end,
+            update_time = now()
+        where id = #{id}
+          and status = 'PROCESSING'
+          and processing_token = #{processingToken}
+    </update>
+
+    <!-- REPAIR_PENDING到期后执行受控补落库；REPAIRING超时记录允许其他实例接管。 -->
+    <select id="listRepairCandidates" resultType="com.sky.entity.SeckillCouponClaimFailure">
+        select *
+        from seckill_coupon_claim_failure
+        where (
+            status = 'REPAIR_PENDING'
+            and coalesce(next_reconcile_time, update_time) &lt;= #{now}
+        ) or (
+            status = 'REPAIRING'
+            and (
+                processing_deadline &lt;= #{now}
+                or (processing_deadline is null and update_time &lt;= #{legacyLeaseExpiredBefore})
+            )
+        )
+        order by coalesce(next_reconcile_time, update_time) asc, id asc
+        limit #{limit}
+    </select>
+
+    <!-- 状态CAS保证同一失败记录只能被一个应用实例执行修复。 -->
+    <update id="tryStartPendingRepair">
+        update seckill_coupon_claim_failure
+        set status = 'REPAIRING',
+            repair_attempts = repair_attempts + 1,
+            next_reconcile_time = null,
+            processing_deadline = #{processingDeadline},
+            processing_token = #{processingToken},
+            update_time = now()
+        where id = #{id}
+          and status = #{expectedStatus}
+    </update>
+
+    <!-- REPAIRING租约超时后重新接管，业务落库已成功时会通过幂等查询直接关闭。 -->
+    <update id="tryReclaimExpiredRepair">
+        update seckill_coupon_claim_failure
+        set repair_attempts = repair_attempts + 1,
+            processing_deadline = #{processingDeadline},
+            processing_token = #{processingToken},
+            update_time = now()
+        where id = #{id}
+          and status = 'REPAIRING'
+          and (
+              processing_deadline &lt;= #{now}
+              or (processing_deadline is null and update_time &lt;= #{legacyLeaseExpiredBefore})
+          )
+    </update>
+
+    <!-- 只有当前REPAIRING持有者可以提交修复终态或下一次退避时间。 -->
+    <update id="completeRepair">
+        update seckill_coupon_claim_failure
+        set status = #{targetStatus},
+            next_reconcile_time = #{nextReconcileTime},
+            processing_deadline = null,
+            processing_token = null,
+            resolution_code = #{resolutionCode},
+            resolution_message = #{resolutionMessage},
+            resolved_time = case when #{targetStatus} = 'RESOLVED' then now() else null end,
+            update_time = now()
+        where id = #{id}
+          and status = 'REPAIRING'
+          and processing_token = #{processingToken}
+    </update>
+
+    <!-- 用户只能按自己的claimId读取抽象状态，治理详情不会返回到C端。 -->
+    <select id="getLatestByClaimIdAndUserId" resultType="com.sky.entity.SeckillCouponClaimFailure">
+        select *
+        from seckill_coupon_claim_failure
+        where claim_id = #{claimId}
+          and user_id = #{userId}
+        order by occurred_time desc, id desc
+        limit 1
+    </select>
+
+    <!-- 活动总账必须等待该券全部治理记录进入RESOLVED后才允许自动结算。 -->
+    <select id="countUnresolvedByCouponId" resultType="long">
+        select count(*)
+        from seckill_coupon_claim_failure
+        where coupon_id = #{couponId}
+          and status &lt;&gt; 'RESOLVED'
+    </select>
+
+</mapper>

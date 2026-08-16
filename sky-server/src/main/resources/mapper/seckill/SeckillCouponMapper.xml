@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.sky.seckill.mapper.SeckillCouponMapper">
+
+    <resultMap id="SeckillCouponEntityMap" type="com.sky.entity.SeckillCoupon">
+        <id column="id" property="id"/>
+        <result column="name" property="name"/>
+        <result column="threshold_amount" property="thresholdAmount"/>
+        <result column="discount_amount" property="discountAmount"/>
+        <result column="total_stock" property="totalStock"/>
+        <result column="remaining_stock" property="remainingStock"/>
+        <result column="claim_start_time" property="claimStartTime"/>
+        <result column="claim_end_time" property="claimEndTime"/>
+        <result column="status" property="status"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_time" property="updateTime"/>
+        <result column="create_user" property="createUser"/>
+        <result column="update_user" property="updateUser"/>
+    </resultMap>
+
+    <resultMap id="SeckillCouponVOMap" type="com.sky.vo.SeckillCouponVO">
+        <id column="id" property="id"/>
+        <result column="name" property="name"/>
+        <result column="threshold_amount" property="thresholdAmount"/>
+        <result column="discount_amount" property="discountAmount"/>
+        <result column="total_stock" property="totalStock"/>
+        <result column="remaining_stock" property="remainingStock"/>
+        <result column="claim_start_time" property="claimStartTime"/>
+        <result column="claim_end_time" property="claimEndTime"/>
+        <result column="status" property="status"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_time" property="updateTime"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.sky.entity.SeckillCoupon"
+            useGeneratedKeys="true" keyProperty="id">
+        insert into seckill_coupon
+            (name, threshold_amount, discount_amount, total_stock, remaining_stock,
+             claim_start_time, claim_end_time, status,
+             create_time, update_time, create_user, update_user)
+        values
+            (#{name}, #{thresholdAmount}, #{discountAmount}, #{totalStock}, #{remainingStock},
+             #{claimStartTime}, #{claimEndTime}, #{status},
+             #{createTime}, #{updateTime}, #{createUser}, #{updateUser})
+    </insert>
+
+    <update id="update" parameterType="com.sky.entity.SeckillCoupon">
+        update seckill_coupon
+        <set>
+            <if test="name != null and name != ''">name = #{name},</if>
+            <if test="thresholdAmount != null">threshold_amount = #{thresholdAmount},</if>
+            <if test="discountAmount != null">discount_amount = #{discountAmount},</if>
+            <if test="totalStock != null">total_stock = #{totalStock},</if>
+            <if test="remainingStock != null">remaining_stock = #{remainingStock},</if>
+            <if test="claimStartTime != null">claim_start_time = #{claimStartTime},</if>
+            <if test="claimEndTime != null">claim_end_time = #{claimEndTime},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="updateTime != null">update_time = #{updateTime},</if>
+            <if test="updateUser != null">update_user = #{updateUser},</if>
+        </set>
+        where id = #{id}
+    </update>
+
+    <select id="getById" resultMap="SeckillCouponEntityMap">
+        select *
+        from seckill_coupon
+        where id = #{id}
+    </select>
+
+    <select id="pageQuery" resultMap="SeckillCouponVOMap">
+        select *
+        from seckill_coupon
+        <where>
+            <if test="name != null and name != ''">
+                and name like concat('%', #{name}, '%')
+            </if>
+            <if test="status != null">
+                and status = #{status}
+            </if>
+        </where>
+        order by create_time desc
+    </select>
+
+    <!-- 用户端查询当前可领取的秒杀券 -->
+    <select id="listAvailable" resultMap="SeckillCouponVOMap">
+        select *
+        from seckill_coupon
+        where status = 1
+          and remaining_stock &gt; 0
+          and claim_start_time &lt;= #{now}
+          and claim_end_time &gt; #{now}
+        order by claim_end_time asc
+    </select>
+
+    <!-- 项目启动时恢复已启用且尚未结束的Redis秒杀活动，未来开始的活动也需要提前写入 -->
+    <select id="listEnabledNotEnded" resultMap="SeckillCouponEntityMap">
+        select *
+        from seckill_coupon
+        where status = 1
+          and claim_end_time &gt; #{now}
+        order by id asc
+    </select>
+
+    <update id="decreaseStockAfterPreDeduct">
+        update seckill_coupon
+        set remaining_stock = remaining_stock - 1,
+            update_time = now()
+        where id = #{id}
+          and remaining_stock &gt; 0
+    </update>
+
+</mapper>

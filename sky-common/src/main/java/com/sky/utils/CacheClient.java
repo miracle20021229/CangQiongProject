@@ -27,13 +27,27 @@ import java.util.function.Supplier;
 @Slf4j
 public class CacheClient {
 
+    // 空值缓存的固定分钟级生存时间，降低缓存穿透压力。
     private static final long CACHE_NULL_TTL_MINUTES = 2L;
+    // 只连接普通展示缓存Redis的字符串模板。
     private final StringRedisTemplate stringRedisTemplate;
+    // 为冷缓存初始化和逻辑过期重建提供分布式锁。
     private final RedissonClient redissonClient;
+    // 执行逻辑过期缓存异步重建任务的线程池。
     private final Executor cacheRebuildExecutor;
+    // 冷缓存互斥锁的最大等待毫秒数。
     private final long mutexLockWaitMillis;
 
-    public CacheClient(StringRedisTemplate stringRedisTemplate, RedissonClient redissonClient,
+    /**
+     * 注入普通缓存Redis模板、分布式锁客户端、重建线程池和锁等待参数。
+     *
+     * @param stringRedisTemplate  只连接普通缓存实例的字符串模板
+     * @param redissonClient       普通缓存实例对应的Redisson客户端
+     * @param cacheRebuildExecutor 缓存异步重建线程池
+     * @param mutexLockWaitMillis  冷缓存互斥锁最大等待毫秒数
+     */
+    public CacheClient(@Qualifier("cacheStringRedisTemplate") StringRedisTemplate stringRedisTemplate,
+                       RedissonClient redissonClient,
                        @Qualifier("cacheRebuildExecutor") Executor cacheRebuildExecutor,
                        @Value("${sky.cache.mutex-lock-wait-millis:500}") long mutexLockWaitMillis) {
         this.stringRedisTemplate = stringRedisTemplate;

@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.sky.seckill.mapper.SeckillCouponClaimSettlementMapper">
+
+    <!-- 唯一券ID配合insert ignore，保证多实例发现同一结束活动时只创建一条结算任务。 -->
+    <insert id="createPendingForEndedCoupons">
+        insert ignore into seckill_coupon_claim_settlement
+            (coupon_id, status, reconcile_attempts, next_reconcile_time, create_time, update_time)
+        select sc.id, 'PENDING', 0, now(), now(), now()
+        from seckill_coupon sc
+        left join seckill_coupon_claim_settlement settlement on settlement.coupon_id = sc.id
+        where sc.claim_end_time &lt;= #{readyBefore}
+          and settlement.id is null
+        order by sc.claim_end_time asc, sc.id asc
+        limit #{limit}
+    </insert>
+
+    <!-- 待结算记录按退避时间执行；PROCESSING超时后允许其他实例恢复。 -->
+    <select id="listCandidates" resultType="com.sky.entity.SeckillCouponClaimSettlement">
+        select *
+        from seckill_coupon_claim_settlement
+        where (
+            status in ('PENDING', 'RECHECK_PENDING')
+            and coalesce(next_reconcile_time, update_time) &lt;= #{now}
+        ) or (
+            status = 'PROCESSING'
+            and (
+                processing_deadline &lt;= #{now}
+                or (processing_deadline is null and update_time &lt;= #{legacyLeaseExpiredBefore})
+            )
+        )
+        order by coalesce(next_reconcile_time, update_time) asc, id asc
+        limit #{limit}
+    </select>
+
+    <!-- 状态CAS保证同一券总账只能被一个应用实例核对。 -->
+    <update id="tryStart">
+        update seckill_coupon_claim_settlement
+        set status = 'PROCESSING',
+            reconcile_attempts = reconcile_attempts + 1,
+            next_reconcile_time = null,
+            processing_deadline = #{processingDeadline},
+            processing_token = #{processingToken},
+            update_time = now()
+        where id = #{id}
+          and status = #{expectedStatus}
+    </update>
+
+    <!-- 处理租约超时后重新抢占，防止进程退出造成活动永久悬空。 -->
+    <update id="tryReclaimExpired">
+        update seckill_coupon_claim_settlement
+        set reconcile_attempts = reconcile_attempts + 1,
+            processing_deadline = #{processingDeadline},
+            processing_token = #{processingToken},
+            update_time = now()
+        where id = #{id}
+          and status = 'PROCESSING'
+          and (
+              processing_deadline &lt;= #{now}
+              or (processing_deadline is null and update_time &lt;= #{legacyLeaseExpiredBefore})
+          )
+    </update>
+
+    <!-- 保存本次MySQL、Redis和失败治理总账快照，只有当前租约持有者可以提交。 -->
+    <update id="complete">
+        update seckill_coupon_claim_settlement
+        set status = #{settlement.status},
+            next_reconcile_time = #{settlement.nextReconcileTime},
+            processing_deadline = null,
+            processing_token = null,
+            total_stock = #{settlement.totalStock},
+            mysql_remaining_stock = #{settlement.mysqlRemainingStock},
+            mysql_claim_count = #{settlement.mysqlClaimCount},
+            redis_remaining_stock = #{settlement.redisRemainingStock},
+            redis_user_count = #{settlement.redisUserCount},
+            redis_claim_count = #{settlement.redisClaimCount},
+            unresolved_failure_count = #{settlement.unresolvedFailureCount},
+            resolution_code = #{settlement.resolutionCode},
+            resolution_message = #{settlement.resolutionMessage},
+            last_checked_time = now(),
+            settled_time = case when #{settlement.status} = 'CONSISTENT' then now() else null end,
+            update_time = now()
+        where id = #{settlement.id}
+          and status = 'PROCESSING'
+          and processing_token = #{settlement.processingToken}
+    </update>
+
+</mapper>

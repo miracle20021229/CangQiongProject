@@ -27,7 +27,7 @@ rocketmq:
 
 mybatis:
   #mapper配置文件
-  mapper-locations: classpath:mapper/*.xml
+  mapper-locations: classpath*:mapper/**/*.xml
   type-aliases-package: com.sky.entity
   configuration:
     #开启驼峰命名
@@ -52,6 +52,38 @@ sky:
     seckill-coupon-claim:
       topic: ${SECKILL_COUPON_CLAIM_TOPIC:sky-seckill-coupon-claim}
       consumer-group: ${SECKILL_COUPON_CLAIM_CONSUMER_GROUP:sky-seckill-coupon-claim-consumer}
+      # 若修改上方原消费组，需同时将 DLQ topic 改为 %DLQ%<新消费组>。
+      dead-letter-topic: ${SECKILL_COUPON_CLAIM_DLQ_TOPIC:%DLQ%sky-seckill-coupon-claim-consumer}
+      dead-letter-consumer-group: ${SECKILL_COUPON_CLAIM_DLQ_CONSUMER_GROUP:sky-seckill-coupon-claim-dlq-audit-consumer}
+      # 非法、待对账和死信消息进入独立治理 Topic，不挤占主领取消费链。
+      failure-topic: ${SECKILL_COUPON_CLAIM_FAILURE_TOPIC:sky-seckill-coupon-claim-failure}
+      failure-consumer-group: ${SECKILL_COUPON_CLAIM_FAILURE_CONSUMER_GROUP:sky-seckill-coupon-claim-failure-consumer}
+  seckill-coupon:
+    claim-reconciliation:
+      # 流程6在本地和部署环境使用同一内部调度入口，不向业务端暴露failureId。
+      enabled: ${SECKILL_CLAIM_RECONCILIATION_ENABLED:true}
+      cron: "${SECKILL_CLAIM_RECONCILIATION_CRON:0/30 * * * * ?}"
+      batch-size: ${SECKILL_CLAIM_RECONCILIATION_BATCH_SIZE:50}
+      ready-delay: ${SECKILL_CLAIM_RECONCILIATION_READY_DELAY:30s}
+      processing-lease: ${SECKILL_CLAIM_RECONCILIATION_PROCESSING_LEASE:2m}
+      manual-after: ${SECKILL_CLAIM_RECONCILIATION_MANUAL_AFTER:30m}
+      # 6A读取异常或证据暂缺时使用有上限的指数退避。
+      recheck-initial-backoff: ${SECKILL_CLAIM_RECONCILIATION_RECHECK_INITIAL_BACKOFF:30s}
+      recheck-max-backoff: ${SECKILL_CLAIM_RECONCILIATION_RECHECK_MAX_BACKOFF:10m}
+      # 6B只对白名单瞬时数据库异常执行有限次数修复，不重放主MQ消息。
+      max-repair-attempts: ${SECKILL_CLAIM_RECONCILIATION_MAX_REPAIR_ATTEMPTS:5}
+      repair-initial-backoff: ${SECKILL_CLAIM_RECONCILIATION_REPAIR_INITIAL_BACKOFF:30s}
+      repair-max-backoff: ${SECKILL_CLAIM_RECONCILIATION_REPAIR_MAX_BACKOFF:10m}
+      # 6C与单笔对账分频执行，活动结束并经过安全窗口后才比较库存总账。
+      settlement-cron: "${SECKILL_CLAIM_SETTLEMENT_CRON:15 * * * * ?}"
+      settlement-batch-size: ${SECKILL_CLAIM_SETTLEMENT_BATCH_SIZE:20}
+      settlement-ready-delay: ${SECKILL_CLAIM_SETTLEMENT_READY_DELAY:10m}
+      settlement-manual-after: ${SECKILL_CLAIM_SETTLEMENT_MANUAL_AFTER:2h}
+      settlement-initial-backoff: ${SECKILL_CLAIM_SETTLEMENT_INITIAL_BACKOFF:1m}
+      settlement-max-backoff: ${SECKILL_CLAIM_SETTLEMENT_MAX_BACKOFF:15m}
+      # 活动证据先保留7天；总账一致后仍保留1天审计窗口再由Redis自动清理。
+      evidence-retention: ${SECKILL_CLAIM_RECONCILIATION_EVIDENCE_RETENTION:7d}
+      settled-evidence-retention: ${SECKILL_CLAIM_RECONCILIATION_SETTLED_EVIDENCE_RETENTION:1d}
   jwt:
     # 设置jwt签名加密时使用的秘钥
     admin-secret-key: itcast
