@@ -51,6 +51,11 @@ public interface DishService {
     List<DishVO> listWithFlavor(Dish dish);
 
     /**
+     * 用户端按分类查询起售菜品，统一经过Caffeine与普通Redis多级缓存。
+     */
+    List<DishVO> listAvailableByCategoryId(Long categoryId);
+
+    /**
      * 根据分类id查询菜品
      * @return
      */

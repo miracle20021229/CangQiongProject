@@ -59,6 +59,11 @@ public interface SetmealService {
     List<Setmeal> list(Setmeal setmeal);
 
     /**
+     * 用户端按分类查询起售套餐，统一经过Caffeine与普通Redis多级缓存。
+     */
+    List<Setmeal> listAvailableByCategoryId(Long categoryId);
+
+    /**
      * 根据id查询套餐中的菜品选项
      * @param id
      * @return

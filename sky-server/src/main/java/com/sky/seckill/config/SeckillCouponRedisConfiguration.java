@@ -13,8 +13,6 @@ public class SeckillCouponRedisConfiguration {
 
     /**
      * 加载秒杀券原子预扣Lua脚本并注册为独立Spring Bean。
-     *
-     * @return 返回Long执行结果的Redis脚本
      */
     @Bean("seckillCouponLuaScript")
     public DefaultRedisScript<Long> seckillCouponLuaScript() {

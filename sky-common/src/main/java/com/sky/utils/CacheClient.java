@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 
 import java.lang.reflect.Type;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadLocalRandom;
@@ -37,6 +38,8 @@ public class CacheClient {
     private final Executor cacheRebuildExecutor;
     // 冷缓存互斥锁的最大等待毫秒数。
     private final long mutexLockWaitMillis;
+    // 逻辑缓存至少保留的物理TTL秒数，防止无人访问的Key永久占用Redis。
+    private final long minimumPhysicalTtlSeconds;
 
     /**
      * 注入普通缓存Redis模板、分布式锁客户端、重建线程池和锁等待参数。
@@ -49,22 +52,66 @@ public class CacheClient {
     public CacheClient(@Qualifier("cacheStringRedisTemplate") StringRedisTemplate stringRedisTemplate,
                        RedissonClient redissonClient,
                        @Qualifier("cacheRebuildExecutor") Executor cacheRebuildExecutor,
-                       @Value("${sky.cache.mutex-lock-wait-millis:500}") long mutexLockWaitMillis) {
+                       @Value("${sky.cache.mutex-lock-wait-millis:500}") long mutexLockWaitMillis,
+                       @Value("${sky.cache.minimum-physical-ttl-seconds:3600}") long minimumPhysicalTtlSeconds) {
         this.stringRedisTemplate = stringRedisTemplate;
         this.redissonClient = redissonClient;
         this.cacheRebuildExecutor = cacheRebuildExecutor;
         this.mutexLockWaitMillis = mutexLockWaitMillis;
+        this.minimumPhysicalTtlSeconds = minimumPhysicalTtlSeconds;
     }
 
     /**
-     * 逻辑过期写入：用RedisData包装业务数据和逻辑过期时间，不设物理TTL。
-     * 用于事务提交后强制刷新缓存。
+     * 逻辑过期写入：逻辑TTL负责异步刷新，较长的物理TTL负责最终回收无人访问的Key。
      */
     public void setWithLogicalExpire(String key, Object value, Long time, TimeUnit unit) {
+        long logicalTtlSeconds = Math.max(1L, unit.toSeconds(time));
+        long physicalTtlSeconds = Math.max(minimumPhysicalTtlSeconds, logicalTtlSeconds * 2L);
         RedisData redisData = new RedisData();
         redisData.setData(value);
         redisData.setExpireTime(LocalDateTime.now().plusSeconds(unit.toSeconds(addJitter(time))));
-        stringRedisTemplate.opsForValue().set(key, JSON.toJSONString(redisData));
+        stringRedisTemplate.opsForValue().set(
+                key,
+                JSON.toJSONString(redisData),
+                addJitter(physicalTtlSeconds),
+                TimeUnit.SECONDS);
+    }
+
+    /**
+     * 使用与缓存重建相同的分布式锁精确删除Key，避免旧查询在写事务提交后回填脏数据。
+     *
+     * @return 成功获得锁并完成删除时返回true；锁竞争时返回false，由MQ广播或TTL继续兜底
+     */
+    public boolean tryDeleteWithMutex(String key) {
+        RLock lock = redissonClient.getLock("lock:" + key);
+        boolean locked;
+        try {
+            locked = lock.tryLock(mutexLockWaitMillis, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+        if (!locked) {
+            return false;
+        }
+        try {
+            // Key已被其他失效消息删除也属于成功；返回值只表达是否获得锁并完成本次失效动作。
+            stringRedisTemplate.delete(key);
+            return true;
+        } finally {
+            if (lock.isHeldByCurrentThread()) {
+                lock.unlock();
+            }
+        }
+    }
+
+    /**
+     * 精确批量删除普通展示缓存，不使用会阻塞Redis的KEYS命令。
+     */
+    public void delete(Collection<String> keys) {
+        if (keys != null && !keys.isEmpty()) {
+            stringRedisTemplate.delete(keys);
+        }
     }
 
     /**

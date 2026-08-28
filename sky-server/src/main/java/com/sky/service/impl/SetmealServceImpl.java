@@ -1,8 +1,13 @@
 package com.sky.service.impl;
 
+import com.alibaba.fastjson2.TypeReference;
 import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
+import com.sky.cache.DisplayCacheKeys;
+import com.sky.cache.DisplayCacheService;
+import com.sky.cache.event.DisplayCacheInvalidationEvent;
 import com.sky.constant.MessageConstant;
+import com.sky.constant.StatusConstant;
 import com.sky.context.BaseContext;
 import com.sky.dto.SetmealDTO;
 import com.sky.dto.SetmealPageQueryDTO;
@@ -17,21 +22,35 @@ import com.sky.vo.DishItemVO;
 import com.sky.vo.SetmealVO;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.lang.reflect.Type;
 import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 @Service
 
 public class SetmealServceImpl implements SetmealService {
+
+    private static final Type SETMEAL_LIST_TYPE =
+            new TypeReference<List<Setmeal>>() { }.getType();
 
     @Autowired
     private SetmealMapper setmealMapper;
 
     @Autowired
     private SetmealDishMapper setmealDishMapper;
+
+    @Autowired
+    private DisplayCacheService displayCacheService;
+
+    @Autowired
+    private ApplicationEventPublisher eventPublisher;
 
     /**
      * 新增套餐
@@ -65,6 +84,7 @@ public class SetmealServceImpl implements SetmealService {
             setmealDishes.forEach(setmealDish -> setmealDish.setSetmealId(setmealId));
             setmealMapper.insertWithDish(setmealDishes);
         }
+        publishCacheInvalidation(List.of(setmealDTO.getCategoryId()));
     }
 
     /**
@@ -114,9 +134,12 @@ public class SetmealServceImpl implements SetmealService {
      * @param id
      */
     @Override
+    @Transactional
     public void startOrStopSetmeal(Integer status, Long id) {
+        Setmeal original = setmealMapper.getById(id);
         Setmeal setmeal = Setmeal.builder().status(status).id(id).build();
         setmealMapper.updata(setmeal);
+        publishCacheInvalidation(List.of(original.getCategoryId()));
     }
 
     /**
@@ -124,8 +147,17 @@ public class SetmealServceImpl implements SetmealService {
      * @param ids
      */
     @Override
+    @Transactional
     public void deleta(List<Long> ids) {
+        Set<Long> affectedCategoryIds = new LinkedHashSet<>();
+        for (Long id : ids) {
+            Setmeal setmeal = setmealMapper.getById(id);
+            if (setmeal != null) {
+                affectedCategoryIds.add(setmeal.getCategoryId());
+            }
+        }
         setmealMapper.delete(ids);
+        publishCacheInvalidation(affectedCategoryIds);
     }
 
 
@@ -134,7 +166,9 @@ public class SetmealServceImpl implements SetmealService {
      * @param setmealDTO
      */
     @Override
+    @Transactional
     public void updata(SetmealDTO setmealDTO) {
+        Setmeal original = setmealMapper.getById(setmealDTO.getId());
         Setmeal setmeal = Setmeal.builder()
                 .id(setmealDTO.getId())
                 .categoryId(setmealDTO.getCategoryId())
@@ -146,6 +180,7 @@ public class SetmealServceImpl implements SetmealService {
                 .build();
 
         setmealMapper.updata(setmeal);
+        publishCacheInvalidation(List.of(original.getCategoryId(), setmealDTO.getCategoryId()));
     }
 
     /**
@@ -159,6 +194,20 @@ public class SetmealServceImpl implements SetmealService {
     }
 
     /**
+     * 用户查询链：Caffeine L1 -> 普通Redis L2 -> MySQL。
+     */
+    @Override
+    public List<Setmeal> listAvailableByCategoryId(Long categoryId) {
+        String key = DisplayCacheKeys.setmealList(categoryId);
+        return displayCacheService.query(key, SETMEAL_LIST_TYPE, () -> {
+            Setmeal setmeal = new Setmeal();
+            setmeal.setCategoryId(categoryId);
+            setmeal.setStatus(StatusConstant.ENABLE);
+            return setmealMapper.list(setmeal);
+        });
+    }
+
+    /**
      * 根据id查询套餐中的菜品选项
      * @param id
      * @return
@@ -166,5 +215,20 @@ public class SetmealServceImpl implements SetmealService {
     @Override
     public List<DishItemVO> getDishItemById(Long id) {
         return setmealMapper.getDishItemBySetmealId(id);
+    }
+
+    /**
+     * 把受影响分类转换成精确Key，并交给AFTER_COMMIT监听器处理。
+     */
+    private void publishCacheInvalidation(Collection<Long> categoryIds) {
+        Set<String> keys = new LinkedHashSet<>();
+        for (Long categoryId : categoryIds) {
+            if (categoryId != null) {
+                keys.add(DisplayCacheKeys.setmealList(categoryId));
+            }
+        }
+        if (!keys.isEmpty()) {
+            eventPublisher.publishEvent(new DisplayCacheInvalidationEvent(keys));
+        }
     }
 }

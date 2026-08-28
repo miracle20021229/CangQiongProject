@@ -2,6 +2,10 @@ package com.sky.service.impl;
 
 import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
+import com.alibaba.fastjson2.TypeReference;
+import com.sky.cache.DisplayCacheKeys;
+import com.sky.cache.DisplayCacheService;
+import com.sky.cache.event.DisplayCacheInvalidationEvent;
 import com.sky.constant.MessageConstant;
 import com.sky.constant.StatusConstant;
 import com.sky.dto.DishDTO;
@@ -17,17 +21,23 @@ import com.sky.vo.DishVO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.lang.reflect.Type;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
 @Service
 @Slf4j
 public class DishServiceImpl implements DishService {
+
+    private static final Type DISH_LIST_TYPE =
+            new TypeReference<List<DishVO>>() { }.getType();
 
     @Autowired
     private DishMapper dishMapper;
@@ -36,7 +46,10 @@ public class DishServiceImpl implements DishService {
     private DishFlavorMapper dishFlavorMapper;
 
     @Autowired
-    private RedisTemplate redisTemplate;
+    private DisplayCacheService displayCacheService;
+
+    @Autowired
+    private ApplicationEventPublisher eventPublisher;
 
     /**
      * 条件查询菜品和口味
@@ -61,6 +74,20 @@ public class DishServiceImpl implements DishService {
     }
 
     /**
+     * 用户查询链：Caffeine L1 -> 普通Redis L2 -> MySQL。
+     */
+    @Override
+    public List<DishVO> listAvailableByCategoryId(Long categoryId) {
+        String key = DisplayCacheKeys.dishList(categoryId);
+        return displayCacheService.query(key, DISH_LIST_TYPE, () -> {
+            Dish dish = new Dish();
+            dish.setCategoryId(categoryId);
+            dish.setStatus(StatusConstant.ENABLE);
+            return listWithFlavor(dish);
+        });
+    }
+
+    /**
      * 新增菜品
      * @param dishDTO
      */
@@ -81,8 +108,8 @@ public class DishServiceImpl implements DishService {
             flavors.forEach(dishFlavor -> dishFlavor.setDishId(dishId));
             dishFlavorMapper.insertBatch(flavors);
         }
-        String key = "dish_" + dishDTO.getCategoryId();
-        cleanCache(key);
+        // 事务内只登记Key；真正删除发生在MySQL提交成功之后。
+        publishCacheInvalidation(List.of(dishDTO.getCategoryId()));
     }
 
     /**
@@ -105,9 +132,12 @@ public class DishServiceImpl implements DishService {
     @Override
     public void deleteBatch(List<Long> ids) {
 
+        Set<Long> affectedCategoryIds = new LinkedHashSet<>();
+
         //判断当前是否能删除菜品---是否启用
         for (Long id : ids) {
             Dish dish = dishMapper.getById(id);
+            affectedCategoryIds.add(dish.getCategoryId());
             if (dish.getStatus() == StatusConstant.ENABLE) {
                 throw new DeletionNotAllowedException("菜品起售中,不能删除");
             }
@@ -121,7 +151,7 @@ public class DishServiceImpl implements DishService {
         dishMapper.deleteByIds(ids);
         dishFlavorMapper.deleteByDishIds(ids);
 
-        cleanCache("dish_*");
+        publishCacheInvalidation(affectedCategoryIds);
     }
 
     /**
@@ -130,14 +160,16 @@ public class DishServiceImpl implements DishService {
      * @param id
      */
     @Override
+    @Transactional
     public void startOrStop(Integer status, Long id) {
+        Dish original = dishMapper.getById(id);
         Dish dish = Dish.builder()
                 .id(id)
                 .status(status)
                 .build();
         dishMapper.update(dish);
 
-        cleanCache("dish_*");
+        publishCacheInvalidation(List.of(original.getCategoryId()));
     }
 
     /**
@@ -163,6 +195,7 @@ public class DishServiceImpl implements DishService {
     @Override
     @Transactional
     public void updateWithFlavor(DishDTO dishDTO) {
+        Dish original = dishMapper.getById(dishDTO.getId());
         Dish dish = new Dish();
         BeanUtils.copyProperties(dishDTO, dish);
         dishMapper.update(dish);
@@ -176,7 +209,7 @@ public class DishServiceImpl implements DishService {
             dishFlavorMapper.insertBatch(flavors);
         }
 
-        cleanCache("dish_*");
+        publishCacheInvalidation(List.of(original.getCategoryId(), dishDTO.getCategoryId()));
     }
 
 
@@ -190,12 +223,17 @@ public class DishServiceImpl implements DishService {
     }
 
     /**
-     * 清除缓存
+     * 把受影响分类转换成精确Key，并交给AFTER_COMMIT监听器处理。
      */
-    private void cleanCache(String pattern) {
-        Set keys = redisTemplate.keys(pattern);
-        if (keys != null && keys.size() > 0) {
-            redisTemplate.delete(keys);
+    private void publishCacheInvalidation(Collection<Long> categoryIds) {
+        Set<String> keys = new LinkedHashSet<>();
+        for (Long categoryId : categoryIds) {
+            if (categoryId != null) {
+                keys.add(DisplayCacheKeys.dishList(categoryId));
+            }
+        }
+        if (!keys.isEmpty()) {
+            eventPublisher.publishEvent(new DisplayCacheInvalidationEvent(keys));
         }
     }
 }

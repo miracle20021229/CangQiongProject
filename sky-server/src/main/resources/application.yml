@@ -19,7 +19,8 @@ spring:
     database: ${sky.redis.database}
 
 rocketmq:
-  name-server: ${ROCKETMQ_NAME_SERVER:127.0.0.1:9876}
+  # 两个NameServer以分号分隔；Broker拓扑变化不影响业务Producer和Consumer。
+  name-server: "${ROCKETMQ_NAME_SERVER:127.0.0.1:9876;127.0.0.1:9877}"
   producer:
     group: ${ROCKETMQ_PRODUCER_GROUP:sky-seckill-producer}
     send-message-timeout: 3000
@@ -42,9 +43,29 @@ logging:
         controller: info
 
 sky:
+  redis:
+    seckill:
+      sentinel:
+        master: ${SECKILL_REDIS_SENTINEL_MASTER:seckill-master}
+        nodes:
+          - ${SECKILL_REDIS_SENTINEL_NODE_1:127.0.0.1:26380}
+          - ${SECKILL_REDIS_SENTINEL_NODE_2:127.0.0.1:26381}
+          - ${SECKILL_REDIS_SENTINEL_NODE_3:127.0.0.1:26382}
   cache:
     # 互斥缓存重建时，单次请求等待Redisson锁的最长时间
     mutex-lock-wait-millis: 500
+    # 逻辑过期Key至少保留1小时物理TTL；逻辑TTL更长时自动保证物理TTL不少于其2倍。
+    minimum-physical-ttl-seconds: 3600
+    multilevel:
+      # 每个应用实例最多保留1024个展示Key，且30秒后自动失效。
+      local-maximum-size: 1024
+      local-ttl: 30s
+      # Redis逻辑过期后返回旧值并异步重建，物理TTL负责最终回收。
+      redis-logical-ttl: 5m
+    invalidation:
+      # 多实例通过广播消费删除各自的Caffeine L1。
+      topic: ${DISPLAY_CACHE_INVALIDATION_TOPIC:sky-cache-invalidation}
+      consumer-group: ${DISPLAY_CACHE_INVALIDATION_CONSUMER_GROUP:sky-cache-invalidation-consumer}
   rocketmq:
     seckill-coupon-compensation:
       topic: ${SECKILL_COUPON_COMPENSATION_TOPIC:sky-seckill-coupon-compensation}
@@ -86,13 +107,13 @@ sky:
       settled-evidence-retention: ${SECKILL_CLAIM_RECONCILIATION_SETTLED_EVIDENCE_RETENTION:1d}
   jwt:
     # 设置jwt签名加密时使用的秘钥
-    admin-secret-key: itcast
+    admin-secret-key: ${SKY_JWT_ADMIN_SECRET_KEY}
     # 设置jwt过期时间
     admin-ttl: 36000000
     # 设置前端传递过来的令牌名称
     admin-token-name: token
     # 设置jwt签名加密时使用的秘钥
-    user-secret-key: itcast_user
+    user-secret-key: ${SKY_JWT_USER_SECRET_KEY}
     # 设置jwt过期时间
     user-ttl: 36000000
     # 设置前端传递过来的令牌名称
