@@ -7,7 +7,6 @@ import org.redisson.client.RedisConnectionException;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.stereotype.Service;
-
 import java.lang.reflect.Type;
 import java.util.Collection;
 import java.util.Objects;
