@@ -1,0 +1,143 @@
+"""订单详情查询与取消订单的业务工具。
+
+查询检查客户归属；取消通过幂等封装执行，并在写入前锁定订单、重验状态。
+"""
+
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+from app.models import Order, OrderStatus
+from app.schemas.domain import OrderResponse
+from app.services.idempotency import IdempotencyScope, execute_idempotent
+from app.services.order_service import get_order as get_order_record
+from app.services.order_service import get_order_for_customer
+from app.tools.base import (
+    DuplicateActionError,
+    InvalidStateTransitionError,
+    OwnershipError,
+    ResourceNotFoundError,
+)
+
+
+class GetOrderInput(BaseModel):
+    order_id: int = Field(gt=0)
+    customer_id: int = Field(gt=0)
+
+
+class CancelOrderInput(BaseModel):
+    customer_id: int = Field(gt=0)
+    order_id: int = Field(gt=0)
+
+
+class CancelOrderOutput(BaseModel):
+    order_id: int
+    customer_id: int
+    status: OrderStatus
+    changed: bool
+    message: str
+
+
+def get_order(
+    session: Session, request: GetOrderInput, *, tenant_id: str = "default"
+) -> OrderResponse:
+    # 区分订单不存在与归属不符，交上层生成相应错误和审计信息。
+    # Preserve anti-enumeration at HTTP boundaries while allowing the trusted
+    # agent/operator projection to distinguish a known foreign-scope resource.
+    scoped_order = get_order_record(session, request.order_id, tenant_id)
+    if scoped_order is not None and scoped_order.customer_id != request.customer_id:
+        raise OwnershipError("Order", request.order_id, request.customer_id)
+    order = get_order_for_customer(session, request.order_id, request.customer_id, tenant_id)
+    if order is None:
+        raise ResourceNotFoundError("Order", request.order_id)
+    return OrderResponse.model_validate(order)
+
+
+def cancel_order(
+    session: Session,
+    request: CancelOrderInput,
+    *,
+    idempotency: IdempotencyScope,
+    tenant_id: str = "default",
+) -> CancelOrderOutput:
+    """取消订单；重复请求读取已有结果，不重复产生业务变更。"""
+
+    def load_result(order_id: int) -> CancelOrderOutput:
+        # 幂等回放返回当前结果，changed=False 表示本次未再改变状态。
+        order = get_order_record(session, order_id, tenant_id)
+        if order is None:
+            raise ResourceNotFoundError("Order", order_id)
+        return CancelOrderOutput(
+            order_id=order.id,
+            customer_id=order.customer_id,
+            status=order.status,
+            changed=False,
+            message="Order was already cancelled",
+        )
+
+    def perform() -> tuple[CancelOrderOutput, int]:
+        # 真正执行时加行锁；用户确认到执行之间的状态变化也要检查。
+        order = validate_cancel_order(session, request, lock=True, tenant_id=tenant_id)
+        order_status = OrderStatus(order.status)
+        if order_status == OrderStatus.CANCELLED:
+            return load_result(order.id), order.id
+        order.status = OrderStatus.CANCELLED
+        session.flush()  # 刷新当前事务中的变更，此处不单独提交。
+        return (
+            CancelOrderOutput(
+                order_id=order.id,
+                customer_id=order.customer_id,
+                status=order.status,
+                changed=True,
+                message="Order cancelled",
+            ),
+            order.id,
+        )
+
+    try:
+        # 统一登记幂等请求、执行业务，并在重放时调用 load_result。
+        return execute_idempotent(
+            session,
+            scope=idempotency,
+            operation="cancel_order",
+            customer_id=request.customer_id,
+            request_payload=request.model_dump(mode="json"),
+            perform=perform,
+            load_result=load_result,
+        )
+    except IntegrityError as error:
+        raise DuplicateActionError(
+            "Cancellation request conflicts with an existing action"
+        ) from error
+
+
+def validate_cancel_order(
+    session: Session,
+    request: CancelOrderInput,
+    *,
+    lock: bool = False,
+    tenant_id: str = "default",
+) -> Order:
+    if lock:
+        order = session.scalar(
+            select(Order)
+            .where(Order.id == request.order_id, Order.tenant_id == tenant_id)
+            .with_for_update()
+        )
+    else:
+        order = get_order_record(session, request.order_id, tenant_id)
+    if order is None:
+        raise ResourceNotFoundError("Order", request.order_id)
+    if order.customer_id != request.customer_id:
+        raise OwnershipError("Order", request.order_id, request.customer_id)
+    order_status = OrderStatus(order.status)
+    # 已取消状态允许幂等返回；已发货等其他状态不能取消。
+    if order_status not in {
+        OrderStatus.PENDING,
+        OrderStatus.PROCESSING,
+        OrderStatus.CANCELLED,
+    }:
+        raise InvalidStateTransitionError(
+            f"Order {order.id} cannot be cancelled from status {order_status.value}"
+        )
+    return order
